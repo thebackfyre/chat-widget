@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
-  <title>Chat Widget (Styled Default)</title>
+  <title>Chat Widget (Multi-Bubble)</title>
   <style>
     :root{
       --pad: 18px;
@@ -35,7 +35,6 @@
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
     }
 
-    /* Debug banner (only if debug=1) */
     #debug {
       position: fixed;
       top: 0; left: 0; right: 0;
@@ -60,15 +59,14 @@
 
       display: flex;
       flex-direction: column;
-      justify-content: flex-end; /* keep newest at the bottom */
+      justify-content: flex-end; /* newest at bottom */
       gap: var(--gap);
 
       max-width: var(--maxWidth);
 
-      overflow: hidden; /* prevents old bubbles from vanishing unpredictably */
+      overflow: hidden;
       pointer-events: none;
     }
-
 
     .msg {
       display: flex;
@@ -134,6 +132,7 @@
     }
   </style>
 </head>
+
 <body>
   <div id="debug"></div>
   <div id="stack"></div>
@@ -144,11 +143,13 @@
     const debug = params.get("debug") === "1";
 
     const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
-    const max = clampInt(params.get("max"), 30, 1, 200);
 
-    // Default lifecycle: keeps it tidy
-    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
-    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
+    // IMPORTANT: If max is 1, you'll only see one bubble. By default setting to 5
+    const max = clampInt(params.get("max"), 30, 5, 200);
+
+    // 0 = never remove bubbles automatically
+    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);
+    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30);
 
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
@@ -156,8 +157,8 @@
     if (debug) {
       $debug.style.display = "block";
       $debug.textContent = demo
-        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`
-        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`;
+        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`
+        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`;
     }
 
     if (demo) runDemo();
@@ -165,15 +166,16 @@
 
     function runDemo() {
       const samples = [
-        { name:"Leo", color:"#9bf", text:"Clean bubble layout, readable on any background 👋" },
-        { name:"ModUser", color:"#6f6", text:"Next: Phase A text badges and better message lifecycle." },
-        { name:"Viewer", color:"#fc6", text:"AlveusSanctuary is a great always-on test channel." }
+        { name:"Leo", color:"#9bf", text:"This should stack multiple chat bubbles 👋" },
+        { name:"ModUser", color:"#6f6", text:"New messages should not overwrite old ones." },
+        { name:"Viewer", color:"#fc6", text:"If you only see one, your URL might have ?max=1." },
+        { name:"Viewer2", color:"#f9c", text:"Try: ?demo=1&max=6&ttl=0 to keep them forever." },
       ];
       let i = 0;
       setInterval(() => {
         const s = samples[i++ % samples.length];
         addMessage(s.name, s.color, [escapeHtml(s.text)]);
-      }, 1200);
+      }, 1100);
     }
 
     function connectIrc(chan) {
@@ -181,7 +183,7 @@
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan})`;
+        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan}) | max=${max}`;
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
@@ -194,6 +196,7 @@
           ws.send("PONG :tmi.twitch.tv");
           return;
         }
+
         const lines = data.split("\r\n").filter(Boolean);
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
@@ -259,6 +262,7 @@
           if (Number.isFinite(start) && Number.isFinite(end)) ranges.push({ start, end, id });
         }
       }
+
       if (!ranges.length) return [escapeHtml(text)];
       ranges.sort((a,b) => a.start - b.start);
 
@@ -273,6 +277,7 @@
       return parts;
     }
 
+    // ✅ MULTI-BUBBLE BEHAVIOR: always creates a NEW bubble and appends it.
     function addMessage(name, color, htmlParts) {
       const el = document.createElement("div");
       el.className = "msg";
@@ -293,17 +298,19 @@
       el.appendChild(meta);
       el.appendChild(textEl);
 
+      // APPEND = stack multiple bubbles (no overwriting)
       $stack.appendChild(el);
 
-      // Keep list tight
-      while ($stack.children.length > max) $stack.removeChild($stack.firstChild);
+      // Keep only the newest `max` bubbles
+      while ($stack.children.length > max) {
+        $stack.removeChild($stack.firstChild);
+      }
 
-      // TTL removal
+      // Auto-remove after TTL (optional)
       if (ttlSeconds > 0) {
         const removeAtMs = ttlSeconds * 1000;
         const fadeMs = Math.max(0, fadeSeconds * 1000);
 
-        // Start fade near the end
         if (fadeMs > 0 && removeAtMs > fadeMs) {
           setTimeout(() => el.classList.add("out"), removeAtMs - fadeMs);
           setTimeout(() => el.remove(), removeAtMs);
@@ -328,6 +335,7 @@
       const i = Math.floor(n);
       return Math.max(min, Math.min(max, i));
     }
+
     function clampFloat(value, fallback, min, max) {
       const n = Number(value);
       if (!Number.isFinite(n)) return fallback;
