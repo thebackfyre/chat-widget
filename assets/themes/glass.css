@@ -1,0 +1,16 @@
+/* Example theme: "glass"
+   Override only variables. Keep it clean.
+*/
+:root{
+  --bubbleBg: rgba(0,0,0,0.55);
+  --bubbleBorder: rgba(255,255,255,0.14);
+  --shadow: 0 14px 38px rgba(0,0,0,0.40);
+  --blur: 12px;
+
+  --radius: 18px;
+  --fontSize: 18px;
+
+  --pad: 18px;
+  --gap: 10px;
+  --maxWidth: 560px;
+}

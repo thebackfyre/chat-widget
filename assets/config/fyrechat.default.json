@@ -1,0 +1,14 @@
+{
+  "channel": "alveussanctuary",
+  "max": 8,
+  "ttl": 22,
+  "fade": 2,
+  "debug": false,
+
+  "badgeProxy": "https://twitch-badge-proxy.thebackfyre.workers.dev",
+
+  "demo": false,
+  "demoBadges": false,
+
+  "theme": "glass"
+}
