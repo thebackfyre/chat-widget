@@ -87,7 +87,8 @@
       transform: translateY(12px);
       animation: in var(--enterMs) ease-out forwards;
 
-      overflow: hidden;
+      /*overflow: hidden; */
+      overflow: visible; /* FIX: prevents text/shadow from being clipped during rapid chat */
     }
 
     @keyframes in {
@@ -124,6 +125,8 @@
       text-shadow: 0 2px 12px rgba(0,0,0,0.35);
       white-space: pre-wrap;
       word-break: break-word;
+      padding-bottom: 2px; /* FIX: prevents descenders (g/y/p) from looking clipped */
+
     }
 
     .emote {
@@ -257,7 +260,7 @@
       const demoBadgesOn = params.get("demoBadges") === "1";
 
       const samples = [
-        { name:"Leo", color:"#9bf", text:"Demo mode 👋 badges will only show if demoBadges=1", badges: "broadcaster/1", roomId: "79615025" },
+        { name:"Fyre", color:"#9bf", text:"Demo mode 👋 badges will only show if demoBadges=1", badges: "broadcaster/1", roomId: "79615025" },
         { name:"ModUser", color:"#6f6", text:"This line tests multiple bubbles + badge rendering.", badges: "moderator/1,subscriber/12", roomId: "79615025" },
         { name:"Viewer", color:"#fc6", text:"If badgeProxy is set, live will show real badges.", badges: "subscriber/3", roomId: "79615025" }
       ];
