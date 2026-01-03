@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
-  <title>Chat Widget (Multi-Bubble)</title>
+  <title>Chat Widget (Styled Default)</title>
   <style>
     :root{
       --pad: 18px;
@@ -35,6 +35,7 @@
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
     }
 
+    /* Debug banner (only if debug=1) */
     #debug {
       position: fixed;
       top: 0; left: 0; right: 0;
@@ -59,12 +60,12 @@
 
       display: flex;
       flex-direction: column;
-      justify-content: flex-end; /* newest at bottom */
+      justify-content: flex-end; /* keep newest at the bottom */
       gap: var(--gap);
 
       max-width: var(--maxWidth);
 
-      overflow: hidden;
+      overflow: hidden; /* prevents old bubbles from vanishing unpredictably */
       pointer-events: none;
     }
 
@@ -109,6 +110,20 @@
       line-height: 1.1;
     }
 
+    /* NEW: badges */
+    .badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge {
+      height: 1.15em;
+      width: auto;
+      vertical-align: -0.18em;
+      image-rendering: -webkit-optimize-contrast;
+    }
+
     .name {
       font-weight: 800;
       font-size: calc(var(--fontSize) * 1.02);
@@ -130,22 +145,8 @@
       vertical-align: -0.25em;
       margin: 0 2px;
     }
-    .badges {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .badge {
-      height: 1.15em;
-      width: auto;
-      vertical-align: -0.18em;
-      image-rendering: -webkit-optimize-contrast;
-    }
-
   </style>
 </head>
-
 <body>
   <div id="debug"></div>
   <div id="stack"></div>
@@ -156,13 +157,11 @@
     const debug = params.get("debug") === "1";
 
     const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
+    const max = clampInt(params.get("max"), 30, 1, 200);
 
-    // IMPORTANT: If max is 1, you'll only see one bubble. By default setting to 5
-    const max = clampInt(params.get("max"), 30, 5, 200);
-
-    // 0 = never remove bubbles automatically
-    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);
-    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30);
+    // Default lifecycle: keeps it tidy
+    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
+    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
 
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
@@ -170,8 +169,8 @@
     if (debug) {
       $debug.style.display = "block";
       $debug.textContent = demo
-        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`
-        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`;
+        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`
+        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`;
     }
 
     if (demo) runDemo();
@@ -179,16 +178,15 @@
 
     function runDemo() {
       const samples = [
-        { name:"Leo", color:"#9bf", text:"This should stack multiple chat bubbles 👋" },
-        { name:"ModUser", color:"#6f6", text:"New messages should not overwrite old ones." },
-        { name:"Viewer", color:"#fc6", text:"If you only see one, your URL might have ?max=1." },
-        { name:"Viewer2", color:"#f9c", text:"Try: ?demo=1&max=6&ttl=0 to keep them forever." },
+        { name:"Fyre", color:"#9bf", text:"Clean bubble layout, readable on any background 👋" },
+        { name:"ModUser", color:"#6f6", text:"Next: badges + images, and full message lifecycle." },
+        { name:"Viewer", color:"#fc6", text:"AlveusSanctuary is a great always-on test channel." }
       ];
       let i = 0;
       setInterval(() => {
         const s = samples[i++ % samples.length];
-        addMessage(s.name, s.color, [escapeHtml(s.text)]);
-      }, 1100);
+        addMessage(s.name, s.color, [escapeHtml(s.text)], []);
+      }, 1200);
     }
 
     function connectIrc(chan) {
@@ -196,7 +194,8 @@
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan}) | max=${max}`;
+        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan})`;
+        // NEW: request membership in addition to tags/commands
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
@@ -209,12 +208,11 @@
           ws.send("PONG :tmi.twitch.tv");
           return;
         }
-
         const lines = data.split("\r\n").filter(Boolean);
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
           const parsed = parsePrivmsg(line);
-          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts);
+          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badgeHtml);
         }
       });
 
@@ -248,7 +246,18 @@
       const emotes = tags["emotes"] || "";
       const htmlParts = buildMessageHtmlParts(text, emotes);
 
-      return { name, color, htmlParts };
+      // NEW: badges -> html
+      const badgeHtml = buildBadgeHtml(tags);
+
+
+      // DEBUG: prove whether badges are arriving from IRC
+      if (debug) {
+        const b = tags["badges"] || "(none)";
+        const bi = tags["badge-info"] || "(none)";
+        $debug.textContent = `badges=${b} | badge-info=${bi} | name=${name}`;
+      }
+
+      return { name, color, htmlParts, badgeHtml };
     }
 
     function parseTags(raw) {
@@ -275,7 +284,6 @@
           if (Number.isFinite(start) && Number.isFinite(end)) ranges.push({ start, end, id });
         }
       }
-
       if (!ranges.length) return [escapeHtml(text)];
       ranges.sort((a,b) => a.start - b.start);
 
@@ -290,13 +298,56 @@
       return parts;
     }
 
-    // ✅ MULTI-BUBBLE BEHAVIOR: always creates a NEW bubble and appends it.
-    function addMessage(name, color, htmlParts) {
+    // NEW: badge rendering (starter / global common badges)
+    function buildBadgeHtml(tags) {
+      const badges = tags["badges"] || "";
+      if (!badges) return [];
+
+      const parts = badges.split(",").filter(Boolean);
+      const html = [];
+
+      for (const p of parts) {
+        const [set, ver] = p.split("/");
+        if (!set || !ver) continue;
+
+        const src = badgeCdnUrl(set, ver);
+        if (!src) continue;
+
+        html.push(`<img class="badge" alt="" src="${src}">`);
+      }
+
+      return html;
+    }
+
+    function badgeCdnUrl(set, ver) {
+      const key = `${set}/${ver}`;
+
+      // Minimal starter map. Full accuracy (subs & custom channel badges)
+      // requires fetching badge sets via Twitch API, which we can do next.
+      const map = {
+        "broadcaster/1": "https://static-cdn.jtvnw.net/chat-badges/broadcaster.png",
+        "moderator/1": "https://static-cdn.jtvnw.net/chat-badges/mod.png",
+        "vip/1": "https://static-cdn.jtvnw.net/chat-badges/vip.png",
+        "partner/1": "https://static-cdn.jtvnw.net/chat-badges/partner.png",
+        "staff/1": "https://static-cdn.jtvnw.net/chat-badges/staff.png",
+        "turbo/1": "https://static-cdn.jtvnw.net/chat-badges/turbo.png",
+        "premium/1": "https://static-cdn.jtvnw.net/chat-badges/premium.png",
+      };
+
+      return map[key] || null;
+    }
+
+    function addMessage(name, color, htmlParts, badgeHtml = []) {
       const el = document.createElement("div");
       el.className = "msg";
 
       const meta = document.createElement("div");
       meta.className = "meta";
+
+      // NEW: badges container
+      const badgesEl = document.createElement("span");
+      badgesEl.className = "badges";
+      badgesEl.innerHTML = badgeHtml.join("");
 
       const nameEl = document.createElement("span");
       nameEl.className = "name";
@@ -307,23 +358,23 @@
       textEl.className = "text";
       textEl.innerHTML = htmlParts.join("");
 
+      meta.appendChild(badgesEl);
       meta.appendChild(nameEl);
+
       el.appendChild(meta);
       el.appendChild(textEl);
 
-      // APPEND = stack multiple bubbles (no overwriting)
       $stack.appendChild(el);
 
-      // Keep only the newest `max` bubbles
-      while ($stack.children.length > max) {
-        $stack.removeChild($stack.firstChild);
-      }
+      // Keep list tight
+      while ($stack.children.length > max) $stack.removeChild($stack.firstChild);
 
-      // Auto-remove after TTL (optional)
+      // TTL removal
       if (ttlSeconds > 0) {
         const removeAtMs = ttlSeconds * 1000;
         const fadeMs = Math.max(0, fadeSeconds * 1000);
 
+        // Start fade near the end
         if (fadeMs > 0 && removeAtMs > fadeMs) {
           setTimeout(() => el.classList.add("out"), removeAtMs - fadeMs);
           setTimeout(() => el.remove(), removeAtMs);
@@ -348,7 +399,6 @@
       const i = Math.floor(n);
       return Math.max(min, Math.min(max, i));
     }
-
     function clampFloat(value, fallback, min, max) {
       const n = Number(value);
       if (!Number.isFinite(n)) return fallback;
