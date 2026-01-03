@@ -110,18 +110,17 @@
       line-height: 1.1;
     }
 
-    /* NEW: badges */
     .badges {
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      margin-right: 6px;
     }
 
     .badge {
-      height: 1.15em;
-      width: auto;
-      vertical-align: -0.18em;
-      image-rendering: -webkit-optimize-contrast;
+      height: 1.2em;
+      vertical-align: -0.2em;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));
     }
 
     .name {
@@ -163,29 +162,42 @@
     const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
     const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
 
+    // Badges
+    const showBadges = (params.get("badges") ?? "1") !== "0";   // default ON
+    const badgeScale = clampInt(params.get("bscale"), 2, 1, 4); // 1|2|4
+    const broadcasterId = (params.get("bid") || "").trim();     // optional numeric channel id
+    let badgeMap = null; // filled by loadBadges()
+
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
 
     if (debug) {
       $debug.style.display = "block";
-      $debug.textContent = demo
-        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`
-        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`;
+      $debug.textContent =
+        `${demo ? "DEMO" : "IRC"} | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | badges=${showBadges ? "on" : "off"} | bid=${broadcasterId || "(none)"} | bscale=${badgeScale}`;
     }
+
+    // Load badge map once (best-effort). Widget still works without it.
+    (async () => {
+      if (showBadges) {
+        badgeMap = await loadBadges(broadcasterId);
+        if (debug) $debug.textContent += " | badgeMap=ready";
+      }
+    })();
 
     if (demo) runDemo();
     else connectIrc(channel);
 
     function runDemo() {
       const samples = [
-        { name:"Fyre", color:"#9bf", text:"Clean bubble layout, readable on any background 👋" },
-        { name:"ModUser", color:"#6f6", text:"Next: badges + images, and full message lifecycle." },
-        { name:"Viewer", color:"#fc6", text:"AlveusSanctuary is a great always-on test channel." }
+        { name:"Leo", color:"#9bf", text:"Badge rendering test: you should see some icons next to my name.", badges:"broadcaster/1,moderator/1" },
+        { name:"ModUser", color:"#6f6", text:"This one should look like a mod/sub combo if those exist.", badges:"moderator/1,subscriber/12" },
+        { name:"Viewer", color:"#fc6", text:"No badges here (or minimal).", badges:"" }
       ];
       let i = 0;
       setInterval(() => {
         const s = samples[i++ % samples.length];
-        addMessage(s.name, s.color, [escapeHtml(s.text)], []);
+        addMessage(s.name, s.color, [escapeHtml(s.text)], s.badges);
       }, 1200);
     }
 
@@ -194,9 +206,8 @@
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan})`;
-        // NEW: request membership in addition to tags/commands
-        ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership");
+        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan}) | badges=${showBadges ? "on" : "off"} | bid=${broadcasterId || "(none)"} | bscale=${badgeScale}`;
+        ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
         ws.send("JOIN #" + chan);
@@ -212,7 +223,7 @@
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
           const parsed = parsePrivmsg(line);
-          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badgeHtml);
+          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badgesTag);
         }
       });
 
@@ -244,20 +255,10 @@
       const name = tags["display-name"] || "Unknown";
       const color = tags["color"] || "#ffffff";
       const emotes = tags["emotes"] || "";
+      const badgesTag = tags["badges"] || "";
+
       const htmlParts = buildMessageHtmlParts(text, emotes);
-
-      // NEW: badges -> html
-      const badgeHtml = buildBadgeHtml(tags);
-
-
-      // DEBUG: prove whether badges are arriving from IRC
-      if (debug) {
-        const b = tags["badges"] || "(none)";
-        const bi = tags["badge-info"] || "(none)";
-        $debug.textContent = `badges=${b} | badge-info=${bi} | name=${name}`;
-      }
-
-      return { name, color, htmlParts, badgeHtml };
+      return { name, color, htmlParts, badgesTag };
     }
 
     function parseTags(raw) {
@@ -298,56 +299,31 @@
       return parts;
     }
 
-    // NEW: badge rendering (starter / global common badges)
-    function buildBadgeHtml(tags) {
-      const badges = tags["badges"] || "";
-      if (!badges) return [];
-
-      const parts = badges.split(",").filter(Boolean);
-      const html = [];
-
-      for (const p of parts) {
-        const [set, ver] = p.split("/");
-        if (!set || !ver) continue;
-
-        const src = badgeCdnUrl(set, ver);
-        if (!src) continue;
-
-        html.push(`<img class="badge" alt="" src="${src}">`);
-      }
-
-      return html;
-    }
-
-    function badgeCdnUrl(set, ver) {
-      const key = `${set}/${ver}`;
-
-      // Minimal starter map. Full accuracy (subs & custom channel badges)
-      // requires fetching badge sets via Twitch API, which we can do next.
-      const map = {
-        "broadcaster/1": "https://static-cdn.jtvnw.net/chat-badges/broadcaster.png",
-        "moderator/1": "https://static-cdn.jtvnw.net/chat-badges/mod.png",
-        "vip/1": "https://static-cdn.jtvnw.net/chat-badges/vip.png",
-        "partner/1": "https://static-cdn.jtvnw.net/chat-badges/partner.png",
-        "staff/1": "https://static-cdn.jtvnw.net/chat-badges/staff.png",
-        "turbo/1": "https://static-cdn.jtvnw.net/chat-badges/turbo.png",
-        "premium/1": "https://static-cdn.jtvnw.net/chat-badges/premium.png",
-      };
-
-      return map[key] || null;
-    }
-
-    function addMessage(name, color, htmlParts, badgeHtml = []) {
+    function addMessage(name, color, htmlParts, badgesTag = "") {
       const el = document.createElement("div");
       el.className = "msg";
 
       const meta = document.createElement("div");
       meta.className = "meta";
 
-      // NEW: badges container
-      const badgesEl = document.createElement("span");
-      badgesEl.className = "badges";
-      badgesEl.innerHTML = badgeHtml.join("");
+      // Badges (best-effort)
+      if (showBadges) {
+        const badges = parseBadgesTag(badgesTag);
+        if (badges.length) {
+          const wrap = document.createElement("span");
+          wrap.className = "badges";
+          for (const b of badges) {
+            const src = pickBadgeUrl(b.setId, b.verId);
+            if (!src) continue;
+            const img = document.createElement("img");
+            img.className = "badge";
+            img.alt = "";
+            img.src = src;
+            wrap.appendChild(img);
+          }
+          if (wrap.childNodes.length) meta.appendChild(wrap);
+        }
+      }
 
       const nameEl = document.createElement("span");
       nameEl.className = "name";
@@ -358,9 +334,7 @@
       textEl.className = "text";
       textEl.innerHTML = htmlParts.join("");
 
-      meta.appendChild(badgesEl);
       meta.appendChild(nameEl);
-
       el.appendChild(meta);
       el.appendChild(textEl);
 
@@ -383,6 +357,81 @@
         }
       }
     }
+
+    // ---------------- Badges (CDN Mapping) ----------------
+
+    async function loadBadges(bid) {
+      const cacheKey = `badgeMap_v1_${bid || "global"}`;
+      const cacheTtlMs = 1000 * 60 * 60 * 24 * 7; // 7 days
+
+      try {
+        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+        if (cached && cached.t && (Date.now() - cached.t) < cacheTtlMs && cached.map) {
+          return cached.map;
+        }
+      } catch {}
+
+      const map = {};
+      await mergeBadgeEndpointIntoMap(
+        "https://badges.twitch.tv/v1/badges/global/display?language=en",
+        map
+      );
+
+      if (bid) {
+        await mergeBadgeEndpointIntoMap(
+          `https://badges.twitch.tv/v1/badges/channels/${encodeURIComponent(bid)}/display?language=en`,
+          map
+        );
+      }
+
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), map }));
+      } catch {}
+
+      return map;
+    }
+
+    async function mergeBadgeEndpointIntoMap(url, map) {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const sets = data?.badge_sets || {};
+        for (const [setId, setObj] of Object.entries(sets)) {
+          if (!map[setId]) map[setId] = {};
+          const versions = setObj?.versions || {};
+          for (const [verId, verObj] of Object.entries(versions)) {
+            map[setId][verId] = {
+              "1": verObj?.image_url_1x,
+              "2": verObj?.image_url_2x,
+              "4": verObj?.image_url_4x,
+              title: verObj?.title || ""
+            };
+          }
+        }
+      } catch {
+        // swallow errors; widget should still run without badge images
+      }
+    }
+
+    function parseBadgesTag(badgesTag) {
+      if (!badgesTag || badgesTag === "(none)") return [];
+      return badgesTag.split(",").map(b => {
+        const [setId, verId] = b.split("/");
+        return setId && verId ? { setId, verId } : null;
+      }).filter(Boolean);
+    }
+
+    function pickBadgeUrl(setId, verId) {
+      if (!badgeMap) return "";
+      const set = badgeMap[setId];
+      const ver = set && set[verId];
+      if (!ver) return "";
+      return ver[String(badgeScale)] || ver["2"] || ver["1"] || ver["4"] || "";
+    }
+
+    // ---------------- Utils ----------------
 
     function escapeHtml(str) {
       return String(str)
