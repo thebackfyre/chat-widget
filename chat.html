@@ -14,5 +14,33 @@ const parent = "thebackfyre.github.io";
 iframe.src = `https://www.twitch.tv/embed/${channel}/chat?parent=${parent}&darkpopout`;
   document.body.appendChild(iframe);
 </script>
+<script>
+const params = new URLSearchParams(location.search);
+const demo = params.get("demo") === "1";
+
+if (demo) {
+  const box = document.createElement("div");
+  box.id = "demo";
+  box.style = "position:fixed;inset:0;padding:14px;font:18px sans-serif;color:white;";
+  document.body.appendChild(box);
+
+  const samples = [
+    {user:"Leo", msg:"demo message: hello world 👋"},
+    {user:"Nightbot", msg:"Remember to hydrate!"},
+    {user:"ModUser", msg:"BIG HYPE IN CHAT 🔥🔥🔥"},
+    {user:"Viewer123", msg:"does this support emotes? Kappa"},
+  ];
+
+  let i = 0;
+  setInterval(() => {
+    const m = samples[i++ % samples.length];
+    const line = document.createElement("div");
+    line.textContent = `${m.user}: ${m.msg}`;
+    line.style = "margin:0 0 10px 0; background:rgba(0,0,0,.45); padding:10px; border-radius:12px;";
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }, 1200);
+}
+</script>
 </body>
 </html>
