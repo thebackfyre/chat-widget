@@ -60,7 +60,7 @@
 
       display: flex;
       flex-direction: column;
-      justify-content: flex-end;
+      justify-content: flex-end; /* keep newest at the bottom */
       gap: var(--gap);
 
       max-width: var(--maxWidth);
@@ -104,7 +104,7 @@
 
     .meta {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 10px;
       flex-wrap: wrap;
       line-height: 1.1;
@@ -112,15 +112,15 @@
 
     .badges {
       display: inline-flex;
-      align-items: center;
       gap: 6px;
-      margin-right: 2px;
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     .badge {
-      height: 1.2em;
-      vertical-align: -0.2em;
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+      vertical-align: -0.20em;
+      image-rendering: auto;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.35));
     }
 
     .name {
@@ -158,50 +158,126 @@
     const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
     const max = clampInt(params.get("max"), 30, 1, 200);
 
-    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);
-    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30);
+    // Lifecycle
+    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
+    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
 
     // Badges
-    const showBadges = (params.get("badges") ?? "1") !== "0";  // default ON
-    const badgeScale = clampInt(params.get("bscale"), 2, 1, 4); // 1|2|4
-    const broadcasterId = (params.get("bid") || "").trim();     // optional numeric id
+    const badgesOn = (params.get("badges") || "on").toLowerCase() !== "off";
+    const bscale = clampFloat(params.get("bscale"), 2.0, 0.5, 5.0);
 
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
 
-    let badgeMap = null;
-    let badgeMapStats = { sets: 0, versions: 0, fetchedGlobal: false, fetchedChannel: false };
+    // badgeKey -> {1x,2x,4x}
+    // badgeKey format: "setId/versionId"
+    let badgeMap = new Map();
+    let badgeSetsCount = 0;
+    let badgeVersCount = 0;
 
-    if (debug) {
-      $debug.style.display = "block";
-      $debug.textContent =
-        `${demo ? "DEMO" : "IRC"} | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | badges=${showBadges ? "on" : "off"} | bid=${broadcasterId || "(none)"} | bscale=${badgeScale}`;
-    }
+    if (debug) $debug.style.display = "block";
 
-    // Start immediately (no blocking), but when badge map becomes ready, refresh existing bubbles.
-    (async () => {
-      if (!showBadges) return;
+    boot();
 
-      badgeMap = await loadBadges(broadcasterId);
-
-      if (debug) {
-        $debug.textContent += ` | badgeMap=ready sets=${badgeMapStats.sets} vers=${badgeMapStats.versions}`;
+    async function boot() {
+      // Load badge maps first (so rendering works immediately)
+      if (badgesOn) {
+        try {
+          await loadBadges(channel);
+        } catch (e) {
+          // keep going; chat still works without badges
+        }
       }
 
-      // This is the critical fix: backfill badges for already-rendered messages.
-      refreshAllBadges();
-    })();
+      updateDebugBanner({
+        mode: demo ? "DEMO" : "IRC ",
+        bid: "(none)",
+      });
 
-    if (demo) runDemo();
-    else connectIrc(channel);
+      if (demo) runDemo();
+      else connectIrc(channel);
+    }
+
+    function updateDebugBanner(extra = {}) {
+      if (!debug) return;
+      const mode = extra.mode ?? (demo ? "DEMO" : "IRC ");
+      const bid  = extra.bid ?? "(none)";
+      const bm   = badgesOn ? "on" : "off";
+
+      $debug.textContent =
+        `${mode} | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | ` +
+        `badges=${bm} | bid=${bid} | bscale=${bscale} | ` +
+        `badgeMap=${badgesOn ? "ready" : "off"} sets=${badgeSetsCount} vers=${badgeVersCount}`;
+    }
+
+    async function loadBadges(chan) {
+      // Twitch badge endpoints (public)
+      const globalUrl  = "https://badges.twitch.tv/v1/badges/global/display?language=en";
+      const channelUrl = `https://badges.twitch.tv/v1/badges/channels/${encodeURIComponent(chan)}/display?language=en`;
+
+      const [g, c] = await Promise.allSettled([
+        fetchJson(globalUrl),
+        fetchJson(channelUrl),
+      ]);
+
+      const newMap = new Map();
+      let sets = 0;
+      let vers = 0;
+
+      if (g.status === "fulfilled") {
+        const { setsCount, versCount } = ingestBadgeJson(g.value, newMap);
+        sets += setsCount; vers += versCount;
+      }
+      if (c.status === "fulfilled") {
+        const { setsCount, versCount } = ingestBadgeJson(c.value, newMap);
+        sets += setsCount; vers += versCount;
+      }
+
+      badgeMap = newMap;
+      badgeSetsCount = sets;
+      badgeVersCount = vers;
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+      return await res.json();
+    }
+
+    function ingestBadgeJson(json, map) {
+      // Expected shape: { badge_sets: { <setId>: { versions: { <verId>: { image_url_1x, image_url_2x, image_url_4x }}}}}
+      const badge_sets = json && json.badge_sets ? json.badge_sets : null;
+      if (!badge_sets) return { setsCount: 0, versCount: 0 };
+
+      const setIds = Object.keys(badge_sets);
+      let versCount = 0;
+
+      for (const setId of setIds) {
+        const set = badge_sets[setId];
+        const versions = set && set.versions ? set.versions : {};
+        for (const verId of Object.keys(versions)) {
+          const v = versions[verId];
+          const key = `${setId}/${verId}`;
+          map.set(key, {
+            "1x": v.image_url_1x || "",
+            "2x": v.image_url_2x || "",
+            "4x": v.image_url_4x || "",
+          });
+          versCount++;
+        }
+      }
+
+      return { setsCount: setIds.length, versCount };
+    }
 
     function runDemo() {
       const samples = [
-        { name:"Leo", color:"#9bf", text:"Badge rendering test: broadcaster + mod should show.", badges:"broadcaster/1,moderator/1" },
-        { name:"ModUser", color:"#6f6", text:"Mod + sub (if available in badge map).", badges:"moderator/1,subscriber/12" },
-        { name:"Viewer", color:"#fc6", text:"No badges here.", badges:"" }
+        { name:"Leo", color:"#9bf", badges:"moderator/1", text:"Demo shows badges + multi-bubble stack ✅" },
+        { name:"SubUser", color:"#6f6", badges:"subscriber/0", text:"If you see a sub badge here, mapping works." },
+        { name:"Viewer", color:"#fc6", badges:"vip/1", text:"Next: cheer, bits, and special badges." }
       ];
       let i = 0;
+
       setInterval(() => {
         const s = samples[i++ % samples.length];
         addMessage(s.name, s.color, [escapeHtml(s.text)], s.badges);
@@ -213,10 +289,7 @@
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        if (debug) {
-          $debug.textContent =
-            `Connected ✅ as ${anonNick} (joining #${chan}) | badges=${showBadges ? "on" : "off"} | bid=${broadcasterId || "(none)"} | bscale=${badgeScale}`;
-        }
+        updateDebugBanner({ mode: "IRC ", bid: "(none)" });
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
@@ -233,7 +306,7 @@
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
           const parsed = parsePrivmsg(line);
-          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badgesTag);
+          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badges);
         }
       });
 
@@ -265,10 +338,15 @@
       const name = tags["display-name"] || "Unknown";
       const color = tags["color"] || "#ffffff";
       const emotes = tags["emotes"] || "";
-      const badgesTag = tags["badges"] || "";
-
+      const badges = tags["badges"] || ""; // <-- this is what we map to images
       const htmlParts = buildMessageHtmlParts(text, emotes);
-      return { name, color, htmlParts, badgesTag };
+
+      if (debug) {
+        // show last seen badges id in banner
+        updateDebugBanner({ mode: "IRC ", bid: badges ? badges : "(none)" });
+      }
+
+      return { name, color, htmlParts, badges };
     }
 
     function parseTags(raw) {
@@ -309,20 +387,46 @@
       return parts;
     }
 
+    function buildBadgesNode(badgesTag) {
+      if (!badgesOn) return null;
+      if (!badgesTag) return null;
+
+      // badges tag looks like: "moderator/1,subscriber/12,glhf-pledge/1"
+      const pairs = badgesTag.split(",").map(s => s.trim()).filter(Boolean);
+      if (!pairs.length) return null;
+
+      const wrap = document.createElement("span");
+      wrap.className = "badges";
+
+      const sizePx = Math.round(14 * bscale); // tweak base size here if you want
+
+      for (const p of pairs) {
+        const info = badgeMap.get(p);
+        if (!info) continue;
+
+        const img = document.createElement("img");
+        img.className = "badge";
+        img.alt = "";
+        img.width = sizePx;
+        img.height = sizePx;
+
+        // pick best available url
+        img.src = info["4x"] || info["2x"] || info["1x"];
+        wrap.appendChild(img);
+      }
+
+      return wrap.childNodes.length ? wrap : null;
+    }
+
     function addMessage(name, color, htmlParts, badgesTag = "") {
       const el = document.createElement("div");
       el.className = "msg";
 
-      // Store badgesTag for later backfill (race-condition fix)
-      el.dataset.badges = badgesTag || "";
-
       const meta = document.createElement("div");
       meta.className = "meta";
 
-      // Placeholder spot for badges (so we can fill/update later)
-      const badgesWrap = document.createElement("span");
-      badgesWrap.className = "badges";
-      meta.appendChild(badgesWrap);
+      const badgesNode = buildBadgesNode(badgesTag);
+      if (badgesNode) meta.appendChild(badgesNode);
 
       const nameEl = document.createElement("span");
       nameEl.className = "name";
@@ -339,11 +443,10 @@
 
       $stack.appendChild(el);
 
-      // Render badges now if map exists; otherwise it’ll be backfilled on badgeMap ready.
-      renderBadgesInto(el);
-
+      // Keep list tight
       while ($stack.children.length > max) $stack.removeChild($stack.firstChild);
 
+      // TTL removal
       if (ttlSeconds > 0) {
         const removeAtMs = ttlSeconds * 1000;
         const fadeMs = Math.max(0, fadeSeconds * 1000);
@@ -356,133 +459,6 @@
         }
       }
     }
-
-    // ---------------- Badge rendering & mapping ----------------
-
-    function refreshAllBadges() {
-      const nodes = $stack.querySelectorAll(".msg");
-      for (const el of nodes) renderBadgesInto(el);
-    }
-
-    function renderBadgesInto(msgEl) {
-      if (!showBadges) return;
-
-      const wrap = msgEl.querySelector(".badges");
-      if (!wrap) return;
-
-      // Clear existing (idempotent)
-      wrap.textContent = "";
-
-      const tag = msgEl.dataset.badges || "";
-      const badges = parseBadgesTag(tag);
-
-      // No tag? nothing to do.
-      if (!badges.length) return;
-
-      // If map isn't ready yet, don't show anything (will backfill later).
-      if (!badgeMap) return;
-
-      for (const b of badges) {
-        const src = pickBadgeUrl(b.setId, b.verId);
-        if (!src) continue;
-
-        const img = document.createElement("img");
-        img.className = "badge";
-        img.alt = "";
-        img.src = src;
-        wrap.appendChild(img);
-      }
-    }
-
-    async function loadBadges(bid) {
-      const cacheKey = `badgeMap_v2_${bid || "global"}`;
-      const cacheTtlMs = 1000 * 60 * 60 * 24 * 7;
-
-      try {
-        const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
-        if (cached && cached.t && (Date.now() - cached.t) < cacheTtlMs && cached.map) {
-          badgeMapStats.sets = cached.stats?.sets || 0;
-          badgeMapStats.versions = cached.stats?.versions || 0;
-          badgeMapStats.fetchedGlobal = true;
-          badgeMapStats.fetchedChannel = !!bid;
-          return cached.map;
-        }
-      } catch {}
-
-      const map = {};
-      const stats = { sets: 0, versions: 0 };
-
-      await mergeBadgeEndpointIntoMap(
-        "https://badges.twitch.tv/v1/badges/global/display?language=en",
-        map,
-        stats
-      );
-      badgeMapStats.fetchedGlobal = true;
-
-      if (bid) {
-        await mergeBadgeEndpointIntoMap(
-          `https://badges.twitch.tv/v1/badges/channels/${encodeURIComponent(bid)}/display?language=en`,
-          map,
-          stats
-        );
-        badgeMapStats.fetchedChannel = true;
-      }
-
-      badgeMapStats.sets = stats.sets;
-      badgeMapStats.versions = stats.versions;
-
-      try {
-        localStorage.setItem(cacheKey, JSON.stringify({ t: Date.now(), map, stats }));
-      } catch {}
-
-      return map;
-    }
-
-    async function mergeBadgeEndpointIntoMap(url, map, stats) {
-      try {
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const sets = data?.badge_sets || {};
-
-        for (const [setId, setObj] of Object.entries(sets)) {
-          if (!map[setId]) {
-            map[setId] = {};
-            stats.sets++;
-          }
-          const versions = setObj?.versions || {};
-          for (const [verId, verObj] of Object.entries(versions)) {
-            map[setId][verId] = {
-              "1": verObj?.image_url_1x,
-              "2": verObj?.image_url_2x,
-              "4": verObj?.image_url_4x,
-              title: verObj?.title || ""
-            };
-            stats.versions++;
-          }
-        }
-      } catch {
-        // swallow; widget still runs
-      }
-    }
-
-    function parseBadgesTag(badgesTag) {
-      if (!badgesTag || badgesTag === "(none)") return [];
-      return badgesTag.split(",").map(b => {
-        const [setId, verId] = b.split("/");
-        return setId && verId ? { setId, verId } : null;
-      }).filter(Boolean);
-    }
-
-    function pickBadgeUrl(setId, verId) {
-      const set = badgeMap && badgeMap[setId];
-      const ver = set && set[verId];
-      if (!ver) return "";
-      return ver[String(badgeScale)] || ver["2"] || ver["1"] || ver["4"] || "";
-    }
-
-    // ---------------- Utils ----------------
 
     function escapeHtml(str) {
       return String(str)
@@ -499,7 +475,6 @@
       const i = Math.floor(n);
       return Math.max(min, Math.min(max, i));
     }
-
     function clampFloat(value, fallback, min, max) {
       const n = Number(value);
       if (!Number.isFinite(n)) return fallback;
