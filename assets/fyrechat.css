@@ -98,7 +98,8 @@ html, body {
   transform: translateY(12px);
   animation: in var(--enterMs) ease-out forwards;
 
-  overflow: hidden;
+  /* overflow: hidden;*/
+  overflow: visible; /* FIX: prevents text/shadow from being clipped during rapid chat */
 }
 
 @keyframes in {
@@ -137,6 +138,7 @@ html, body {
   text-shadow: 0 2px 12px rgba(0,0,0,0.35);
   white-space: pre-wrap;
   word-break: break-word;
+  padding-bottom: 2px; /* FIX for overflow */
 }
 
 /* Twitch emote images */
