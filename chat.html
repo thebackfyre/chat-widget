@@ -8,18 +8,27 @@
     :root{
       --pad: 14px;
       --gap: 10px;
-      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
       --fontSize: 18px;
+      --maxWidth: 520px;
 
       --bubbleBg: rgba(0,0,0,0.55);
+      --textColor: rgba(255,255,255,0.95);
+      --outline: 1px solid rgba(255,255,255,0.10);
+      --shadow: 0 10px 28px rgba(0,0,0,0.35);
+
       --bubbleBlur: 10px;
       --radius: 14px;
 
-      --nameWeight: 700;
+      --nameWeight: 800;
       --msgWeight: 500;
 
-      --shadow: 0 10px 28px rgba(0,0,0,0.35);
-      --outline: 1px solid rgba(255,255,255,0.10);
+      --badgeBg: rgba(255,255,255,0.12);
+      --badgeText: rgba(255,255,255,0.95);
+      --badgeRadius: 999px;
+
+      --enterMs: 220ms;
+      --exitMs: 250ms;
+      --exitShift: 8px;
     }
 
     html, body {
@@ -28,7 +37,22 @@
       height: 100%;
       background: transparent;
       overflow: hidden;
-      font-family: var(--font);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+
+    #debug {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding: 6px 10px;
+      font: 13px ui-sans-serif, system-ui;
+      background: rgba(255,0,0,0.75);
+      color: #fff;
+      z-index: 99999;
+      display: none;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     #root {
@@ -36,19 +60,18 @@
       inset: 0;
       padding: var(--pad);
       display: flex;
-      align-items: flex-end; /* chat stacks from bottom */
-      justify-content: flex-start;
       pointer-events: none;
     }
 
     #stack {
       width: 100%;
-      max-width: 520px; /* adjust for your overlay width */
+      max-width: var(--maxWidth);
       display: flex;
       flex-direction: column;
       gap: var(--gap);
     }
 
+    /* message bubble */
     .msg {
       display: inline-flex;
       flex-direction: column;
@@ -60,23 +83,58 @@
       -webkit-backdrop-filter: blur(var(--bubbleBlur));
       box-shadow: var(--shadow);
       border: var(--outline);
-      transform: translateY(10px);
-      opacity: 0;
-      animation: in 220ms ease-out forwards;
       max-width: 100%;
       word-wrap: break-word;
+      opacity: 1;
+      transform: translateY(0);
     }
 
+    /* enter animation */
+    .anim-in {
+      transform: translateY(10px);
+      opacity: 0;
+      animation: in var(--enterMs) ease-out forwards;
+    }
     @keyframes in {
       to { transform: translateY(0); opacity: 1; }
     }
 
+    /* exit animation */
+    .anim-out {
+      animation: out var(--exitMs) ease-in forwards;
+    }
+    @keyframes out {
+      to { opacity: 0; transform: translateY(var(--exitShift)); }
+    }
+
     .topline{
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 10px;
-      line-height: 1.1;
       flex-wrap: wrap;
+      line-height: 1.1;
+    }
+
+    .badges{
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .badge{
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      font-size: calc(var(--fontSize) * 0.68);
+      line-height: 1;
+      border-radius: var(--badgeRadius);
+      background: var(--badgeBg);
+      color: var(--badgeText);
+      border: 1px solid rgba(255,255,255,0.10);
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      font-weight: 800;
     }
 
     .name{
@@ -89,7 +147,7 @@
       font-weight: var(--msgWeight);
       font-size: var(--fontSize);
       line-height: 1.25;
-      color: rgba(255,255,255,0.95);
+      color: var(--textColor);
       text-shadow: 0 2px 10px rgba(0,0,0,0.35);
       white-space: pre-wrap;
     }
@@ -99,27 +157,6 @@
       vertical-align: -0.25em;
       margin: 0 2px;
     }
-
-    /* Optional debug banner */
-    #debug {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      padding: 6px 10px;
-      font: 13px var(--font);
-      background: rgba(255,0,0,0.75);
-      color: #fff;
-      z-index: 99999;
-      display: none;
-      pointer-events: none;
-    }
-
-    /* Fade-out animation when TTL expires */
-    .out {
-      animation: out 250ms ease-in forwards;
-    }
-    @keyframes out {
-      to { opacity: 0; transform: translateY(8px); }
-    }
   </style>
 </head>
 <body>
@@ -127,17 +164,35 @@
   <div id="root"><div id="stack"></div></div>
 
   <script>
-    // ---------- URL params ----------
     const params = new URLSearchParams(location.search);
-    const demo = params.get("demo") === "1";
-    const debug = params.get("debug") === "1";
 
-    // Pick channel via ?ch=..., fallback to your default
-    const DEFAULT_CHANNEL = "YOURCHANNEL"; // <-- set your own default here
+    // ---- core toggles ----
+    const demo       = params.get("demo") === "1";
+    const debug      = params.get("debug") === "1";
+    const anim       = getBool(params, "anim", true);
+    const showBadges = getBool(params, "badges", true);
+    const showName   = getBool(params, "name", true);
+
+    // ---- channel ----
+    const DEFAULT_CHANNEL = (params.get("default") || "alveussanctuary").toLowerCase();
     const channel = (params.get("ch") || DEFAULT_CHANNEL).toLowerCase();
 
+    // ---- behavior ----
     const maxMessages = clampInt(params.get("max"), 30, 1, 200);
     const ttlSeconds  = clampInt(params.get("ttl"), 20, 0, 3600); // 0 = never remove
+    const fadeSeconds = clampFloat(params.get("fade"), 0.25, 0, 30); // seconds (0 = no fade animation)
+    const enterMs     = clampInt(params.get("enter"), 220, 0, 2000);
+    const exitMs      = clampInt(params.get("exit"), 250, 0, 2000);
+
+    // ---- style from URL (no editing needed) ----
+    applyCssVarsFromUrl(params);
+
+    // apply animation timings
+    document.documentElement.style.setProperty("--enterMs", `${enterMs}ms`);
+    document.documentElement.style.setProperty("--exitMs", `${exitMs}ms`);
+
+    // layout controls
+    applyLayoutFromUrl(params);
 
     const $stack = document.getElementById("stack");
     const $debug = document.getElementById("debug");
@@ -145,60 +200,64 @@
     if (debug) {
       $debug.style.display = "block";
       $debug.textContent = demo
-        ? `DEMO MODE | channel=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s`
-        : `LIVE IRC MODE | channel=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s`;
+        ? `DEMO | ch=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`
+        : `LIVE IRC | ch=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`;
     }
 
-    // ---------- Demo mode ----------
     if (demo) {
-      const samples = [
-        { name: "Leo", color: "#9bf", text: "demo: message readability check 👋" },
-        { name: "Viewer01", color: "#6f6", text: "demo: bubble spacing + padding looks good" },
-        { name: "ModUser", color: "#f66", text: "demo: HYPE 🔥🔥🔥" },
-        { name: "Viewer123", color: "#fc6", text: "demo: Kappa (emotes won't render in demo mode)" }
-      ];
-      let i = 0;
-      setInterval(() => {
-        const m = samples[i++ % samples.length];
-        addMessage({ displayName: m.name, color: m.color, htmlParts: [escapeHtml(m.text)] });
-      }, 1200);
+      runDemo();
     } else {
       connectTwitchIrc(channel);
     }
 
-    // ---------- Twitch IRC via WebSocket (anonymous read-only) ----------
-    function connectTwitchIrc(chan) {
-      // Twitch IRC over WebSocket
-      const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+    // ---- DEMO ----
+    function runDemo(){
+      const samples = [
+        { tags: { "display-name":"Leo", color:"#9bf", badges:"broadcaster/1" }, text:"demo: broadcaster badge + styling 👋" },
+        { tags: { "display-name":"ModUser", color:"#f66", badges:"moderator/1" }, text:"demo: MOD badge, message fades later" },
+        { tags: { "display-name":"VIPUser", color:"#c6f", badges:"vip/1" }, text:"demo: VIP badge" },
+        { tags: { "display-name":"SubUser", color:"#6f6", badges:"subscriber/12" }, text:"demo: SUB badge (tier/length varies)" },
+        { tags: { "display-name":"Viewer123", color:"#fc6", badges:"" }, text:"demo: normal chatter, emotes won't render here" }
+      ];
+      let i = 0;
+      setInterval(() => {
+        const s = samples[i++ % samples.length];
+        const parsed = {
+          displayName: s.tags["display-name"],
+          color: s.tags.color,
+          badges: parseBadgesTag(s.tags.badges || ""),
+          htmlParts: [escapeHtml(s.text)]
+        };
+        addMessage(parsed);
+      }, 1200);
+    }
 
-      // Keep a random anonymous nick
+    // ---- TWITCH IRC (anonymous read-only) ----
+    function connectTwitchIrc(chan) {
+      const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        // Request tags so we can read display-name, color, emotes, etc.
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
-        ws.send("PASS SCHMOOPIIE"); // anonymous pass
+        ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
         ws.send("JOIN #" + chan);
-        if (debug) $debug.textContent = `LIVE IRC MODE | channel=${chan} | connected as ${anonNick}`;
+        if (debug) $debug.textContent = `LIVE IRC | ch=${chan} | connected as ${anonNick}`;
       });
 
       ws.addEventListener("message", (ev) => {
         const data = ev.data;
-        // Respond to PING keepalive
+
         if (typeof data === "string" && data.startsWith("PING")) {
           ws.send("PONG :tmi.twitch.tv");
           return;
         }
 
-        // Twitch can send multiple lines at once
         const lines = String(data).split("\r\n").filter(Boolean);
         for (const line of lines) {
-          // We only care about chat messages (PRIVMSG)
           if (line.includes(" PRIVMSG #")) {
             const parsed = parsePrivmsg(line);
-            if (!parsed) continue;
-            addMessage(parsed);
+            if (parsed) addMessage(parsed);
           }
         }
       });
@@ -207,16 +266,10 @@
         if (debug) $debug.textContent = `DISCONNECTED | retrying in 2s...`;
         setTimeout(() => connectTwitchIrc(chan), 2000);
       });
-
-      ws.addEventListener("error", () => {
-        // The close handler will retry
-      });
     }
 
-    // ---------- Parse PRIVMSG with tags ----------
+    // ---- Parse PRIVMSG with tags ----
     function parsePrivmsg(line) {
-      // Format (roughly):
-      // @tag1=...;tag2=... :user!user@user.tmi.twitch.tv PRIVMSG #channel :message text
       let tags = {};
       let rest = line;
 
@@ -230,24 +283,21 @@
       const msgIdx = rest.indexOf(" :");
       if (msgIdx === -1) return null;
 
-      const prefixAndCmd = rest.slice(0, msgIdx);
       const messageText = rest.slice(msgIdx + 2);
 
-      // Extract display name + color
       const displayName = tags["display-name"] || "Unknown";
       const color = tags["color"] || "#ffffff";
 
-      // Build HTML parts with emotes
+      const badges = parseBadgesTag(tags["badges"] || "");
       const emoteTag = tags["emotes"] || "";
       const htmlParts = buildMessageHtmlParts(messageText, emoteTag);
 
-      return { displayName, color, htmlParts };
+      return { displayName, color, badges, htmlParts };
     }
 
     function parseTags(raw) {
       const out = {};
-      const parts = raw.split(";");
-      for (const p of parts) {
+      for (const p of raw.split(";")) {
         const eq = p.indexOf("=");
         const k = eq === -1 ? p : p.slice(0, eq);
         const v = eq === -1 ? "" : p.slice(eq + 1);
@@ -256,16 +306,21 @@
       return out;
     }
 
-    // emotes tag example: "25:0-4,12-16/1902:6-10"
-    // Ranges are based on character indices in the raw message (usually works fine for typical chat/emotes).
+    // badges tag example: "moderator/1,subscriber/12,vip/1"
+    function parseBadgesTag(badgesStr){
+      if (!badgesStr) return [];
+      return badgesStr.split(",").map(b => {
+        const [type, ver] = b.split("/");
+        return { type, ver };
+      }).filter(x => x.type);
+    }
+
+    // Twitch emotes tag example: "25:0-4,12-16/1902:6-10"
     function buildMessageHtmlParts(text, emotesTag) {
-      // No emotes: return escaped whole message
       if (!emotesTag) return [escapeHtml(text)];
 
-      // Parse all emote ranges into a flat list
       const ranges = [];
-      const emoteDefs = emotesTag.split("/").filter(Boolean);
-      for (const def of emoteDefs) {
+      for (const def of emotesTag.split("/").filter(Boolean)) {
         const [id, locs] = def.split(":");
         if (!id || !locs) continue;
         for (const loc of locs.split(",")) {
@@ -276,85 +331,198 @@
           }
         }
       }
-
       if (ranges.length === 0) return [escapeHtml(text)];
       ranges.sort((a, b) => a.start - b.start);
 
-      // Build HTML segments from the message
       const parts = [];
       let cursor = 0;
 
       for (const r of ranges) {
-        if (r.start > cursor) {
-          parts.push(escapeHtml(text.slice(cursor, r.start)));
-        }
-        // Insert emote image
+        if (r.start > cursor) parts.push(escapeHtml(text.slice(cursor, r.start)));
         const emoteUrl = `https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/1.0`;
         parts.push(`<img class="emote" alt="" src="${emoteUrl}">`);
         cursor = r.end + 1;
       }
-
-      if (cursor < text.length) {
-        parts.push(escapeHtml(text.slice(cursor)));
-      }
+      if (cursor < text.length) parts.push(escapeHtml(text.slice(cursor)));
 
       return parts;
     }
 
-    // ---------- Render ----------
-    function addMessage({ displayName, color, htmlParts }) {
+    // ---- Render ----
+    function addMessage({ displayName, color, badges, htmlParts }) {
       const el = document.createElement("div");
       el.className = "msg";
+      if (anim && enterMs > 0) el.classList.add("anim-in");
 
       const top = document.createElement("div");
       top.className = "topline";
 
-      const name = document.createElement("span");
-      name.className = "name";
-      name.textContent = displayName;
-      name.style.color = color || "#fff";
+      if (showBadges) {
+        const badgeRow = renderTextBadges(badges || []);
+        if (badgeRow) top.appendChild(badgeRow);
+      }
 
-      top.appendChild(name);
+      if (showName) {
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = displayName;
+        name.style.color = color || "#fff";
+        top.appendChild(name);
+      }
 
       const text = document.createElement("div");
       text.className = "text";
       text.innerHTML = htmlParts.join("");
 
-      el.appendChild(top);
+      // If topline would be empty, don't append it (keeps layout clean if name/badges off)
+      if (top.childNodes.length) el.appendChild(top);
       el.appendChild(text);
 
       $stack.appendChild(el);
 
-      // Enforce max messages (remove oldest from top)
+      // enforce max messages (remove oldest from top)
       while ($stack.children.length > maxMessages) {
         $stack.removeChild($stack.firstChild);
       }
 
-      // TTL removal (fade out then remove)
+      // TTL removal
       if (ttlSeconds > 0) {
+        const fadeAt = Math.max(0, ttlSeconds - fadeSeconds);
         setTimeout(() => {
-          el.classList.add("out");
-          setTimeout(() => el.remove(), 260);
+          if (fadeSeconds > 0 && anim && exitMs > 0) {
+            el.classList.add("anim-out");
+            setTimeout(() => el.remove(), exitMs + 30);
+          } else {
+            el.remove();
+          }
         }, ttlSeconds * 1000);
       }
     }
 
-    // ---------- helpers ----------
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+    function renderTextBadges(badges){
+      // Map badge types → labels (Phase A)
+      // Not all badges appear in all channels; order matters.
+      const order = [
+        "broadcaster",
+        "moderator",
+        "vip",
+        "partner",
+        "staff",
+        "admin",
+        "global_mod",
+        "founder",
+        "subscriber",
+        "bits"
+      ];
+
+      const labelFor = (b) => {
+        switch (b.type) {
+          case "broadcaster": return "LIVE";
+          case "moderator": return "MOD";
+          case "vip": return "VIP";
+          case "partner": return "PARTNER";
+          case "staff": return "STAFF";
+          case "admin": return "ADMIN";
+          case "global_mod": return "GLOBAL MOD";
+          case "founder": return "FOUNDER";
+          case "subscriber": return "SUB";
+          case "bits": return "BITS";
+          default: return null;
+        }
+      };
+
+      // keep only known badges
+      const filtered = badges
+        .map(b => ({...b, label: labelFor(b)}))
+        .filter(b => b.label);
+
+      if (!filtered.length) return null;
+
+      // sort by preferred order
+      filtered.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
+
+      const row = document.createElement("div");
+      row.className = "badges";
+
+      for (const b of filtered) {
+        const pill = document.createElement("span");
+        pill.className = "badge";
+        // include subscriber "months"/tier-ish hint if version is present (light touch)
+        if (b.type === "subscriber" && b.ver) {
+          pill.textContent = `SUB`;
+        } else {
+          pill.textContent = b.label;
+        }
+        row.appendChild(pill);
+      }
+
+      return row;
     }
 
-    function clampInt(value, fallback, min, max) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return fallback;
-      const i = Math.floor(n);
-      return Math.max(min, Math.min(max, i));
+    // ---- URL → CSS vars (customizable without editing) ----
+    function applyCssVarsFromUrl(p){
+      // numeric
+      setVarNum(p, "pad", "--pad", 14, 0, 100, "px");
+      setVarNum(p, "gap", "--gap", 10, 0, 60, "px");
+      setVarNum(p, "fs", "--fontSize", 18, 10, 60, "px");
+      setVarNum(p, "mw", "--maxWidth", 520, 200, 1200, "px");
+      setVarNum(p, "radius", "--radius", 14, 0, 60, "px");
+      setVarNum(p, "blur", "--bubbleBlur", 10, 0, 40, "px");
+
+      // colors via r,g,b,a format: bg=0,0,0,0.55
+      setVarRgba(p, "bg", "--bubbleBg", "rgba(0,0,0,0.55)");
+      setVarRgba(p, "tc", "--textColor", "rgba(255,255,255,0.95)");
+      setVarRgba(p, "bbg", "--badgeBg", "rgba(255,255,255,0.12)");
+      setVarRgba(p, "btc", "--badgeText", "rgba(255,255,255,0.95)");
+
+      // outline/shadow strings (advanced)
+      // outline=1px solid rgba(255,255,255,0.10)
+      if (p.has("outline")) document.documentElement.style.setProperty("--outline", decodeURIComponent(p.get("outline")));
+      // shadow=0 10px 28px rgba(0,0,0,0.35)
+      if (p.has("shadow")) document.documentElement.style.setProperty("--shadow", decodeURIComponent(p.get("shadow")));
     }
-  </script>
-</body>
-</html>
+
+    // ---- Layout control (no CSS edits) ----
+    function applyLayoutFromUrl(p){
+      // align: left|center|right
+      const align = (p.get("align") || "left").toLowerCase();
+      const root = document.getElementById("root");
+
+      // stack: bottom|top
+      const stackDir = (p.get("stack") || "bottom").toLowerCase();
+      const stack = document.getElementById("stack");
+
+      // root uses flex; stack is a column
+      if (align === "center") root.style.justifyContent = "center";
+      else if (align === "right") root.style.justifyContent = "flex-end";
+      else root.style.justifyContent = "flex-start";
+
+      if (stackDir === "top") {
+        root.style.alignItems = "flex-start";
+        stack.style.flexDirection = "column";
+      } else {
+        root.style.alignItems = "flex-end";
+        stack.style.flexDirection = "column";
+      }
+    }
+
+    // ---- helpers ----
+    function getBool(p, key, fallback){
+      if (!p.has(key)) return fallback;
+      const v = (p.get(key) || "").toLowerCase();
+      return v === "1" || v === "true" || v === "yes" || v === "on";
+    }
+
+    function setVarNum(p, key, cssVar, fallback, min, max, unit){
+      const v = p.get(key);
+      if (v == null) {
+        document.documentElement.style.setProperty(cssVar, `${fallback}${unit}`);
+        return;
+      }
+      const n = Number(v);
+      if (!Number.isFinite(n)) return;
+      const clamped = Math.max(min, Math.min(max, n));
+      document.documentElement.style.setProperty(cssVar, `${clamped}${unit}`);
+    }
+
+    function setVarRgba(
