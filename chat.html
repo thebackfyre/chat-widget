@@ -3,46 +3,132 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
-  <title>Chat Widget (Minimal)</title>
+  <title>Chat Widget (Styled Default)</title>
   <style>
-    html, body { margin:0; width:100%; height:100%; background:transparent; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    :root{
+      --pad: 18px;
+      --gap: 10px;
+      --maxWidth: 560px;
+
+      --fontSize: 18px;
+      --lineHeight: 1.28;
+
+      --bubbleBg: rgba(0,0,0,0.58);
+      --bubbleBorder: rgba(255,255,255,0.10);
+      --textColor: rgba(255,255,255,0.95);
+
+      --radius: 16px;
+      --blur: 10px;
+      --shadow: 0 12px 34px rgba(0,0,0,0.35);
+
+      --enterMs: 200ms;
+      --exitMs: 260ms;
+      --exitShift: 10px;
+    }
+
+    html, body {
+      margin:0;
+      width:100%;
+      height:100%;
+      background: transparent;
+      overflow:hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+
+    /* Debug banner (only if debug=1) */
     #debug {
-      position: fixed; top:0; left:0; right:0;
+      position: fixed;
+      top: 0; left: 0; right: 0;
       padding: 8px 10px;
-      background: rgba(255,0,0,0.85);
-      color: white;
-      font-size: 14px;
+      background: rgba(255,0,0,0.80);
+      color: #fff;
+      font-size: 13px;
       z-index: 99999;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-    #stack {
-      position: fixed; left: 14px; right: 14px; bottom: 14px;
-      display: flex; flex-direction: column; gap: 10px;
-      max-width: 520px;
+      display: none;
       pointer-events: none;
     }
-    .msg {
-      background: rgba(0,0,0,0.55);
-      color: rgba(255,255,255,0.95);
-      border-radius: 14px;
-      padding: 12px 14px;
-      font-size: 18px;
-      line-height: 1.25;
-      border: 1px solid rgba(255,255,255,0.10);
-      box-shadow: 0 10px 28px rgba(0,0,0,0.35);
-      opacity: 0;
-      transform: translateY(10px);
-      animation: in 220ms ease-out forwards;
+
+    #stack {
+      position: fixed;
+      left: var(--pad);
+      right: var(--pad);
+      bottom: var(--pad);
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+      max-width: var(--maxWidth);
+      pointer-events: none;
     }
-    @keyframes in { to { opacity:1; transform: translateY(0); } }
-    .name { font-weight: 800; margin-right: 8px; }
-    .emote { height: 1.25em; vertical-align: -0.25em; margin: 0 2px; }
+
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 12px 14px;
+      border-radius: var(--radius);
+
+      background: var(--bubbleBg);
+      border: 1px solid var(--bubbleBorder);
+      box-shadow: var(--shadow);
+
+      backdrop-filter: blur(var(--blur));
+      -webkit-backdrop-filter: blur(var(--blur));
+
+      opacity: 0;
+      transform: translateY(12px);
+      animation: in var(--enterMs) ease-out forwards;
+
+      overflow: hidden;
+    }
+
+    @keyframes in {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .out {
+      animation: out var(--exitMs) ease-in forwards;
+    }
+
+    @keyframes out {
+      to { opacity: 0; transform: translateY(var(--exitShift)); }
+    }
+
+    .meta {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      line-height: 1.1;
+    }
+
+    .name {
+      font-weight: 800;
+      font-size: calc(var(--fontSize) * 1.02);
+      text-shadow: 0 2px 10px rgba(0,0,0,0.35);
+    }
+
+    .text {
+      font-weight: 500;
+      font-size: var(--fontSize);
+      line-height: var(--lineHeight);
+      color: var(--textColor);
+      text-shadow: 0 2px 12px rgba(0,0,0,0.35);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .emote {
+      height: 1.25em;
+      vertical-align: -0.25em;
+      margin: 0 2px;
+    }
   </style>
 </head>
 <body>
-  <div id="debug">LOADED ✅</div>
+  <div id="debug"></div>
   <div id="stack"></div>
 
   <script>
@@ -53,30 +139,28 @@
     const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
     const max = clampInt(params.get("max"), 30, 1, 200);
 
+    // Default lifecycle: keeps it tidy
+    const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
+    const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
+
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
 
-    // Always show status banner so the page never "looks blank"
-    $debug.textContent = demo
-      ? `LOADED ✅ | DEMO MODE | ch=${channel}`
-      : `LOADED ✅ | IRC MODE | ch=${channel}`;
-
-    if (!debug) {
-      // Hide the banner if debug=0 (default)
-      $debug.style.display = "none";
+    if (debug) {
+      $debug.style.display = "block";
+      $debug.textContent = demo
+        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`
+        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s`;
     }
 
-    if (demo) {
-      runDemo();
-    } else {
-      connectIrc(channel);
-    }
+    if (demo) runDemo();
+    else connectIrc(channel);
 
     function runDemo() {
       const samples = [
-        { name:"Leo", color:"#9bf", text:"demo: this page is rendering" },
-        { name:"ModUser", color:"#6f6", text:"demo: next is IRC mode" },
-        { name:"Viewer", color:"#fc6", text:"demo: alveussanctuary is a good live test channel" }
+        { name:"Leo", color:"#9bf", text:"Clean bubble layout, readable on any background 👋" },
+        { name:"ModUser", color:"#6f6", text:"Next: Phase A text badges and better message lifecycle." },
+        { name:"Viewer", color:"#fc6", text:"AlveusSanctuary is a great always-on test channel." }
       ];
       let i = 0;
       setInterval(() => {
@@ -86,18 +170,11 @@
     }
 
     function connectIrc(chan) {
-      let ws;
-      try {
-        ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
-      } catch (e) {
-        showDebug(`WebSocket failed: ${e.message}`);
-        return;
-      }
-
+      const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        showDebug(`Connected ✅ as ${anonNick} (joining #${chan})`);
+        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan})`;
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
@@ -110,7 +187,6 @@
           ws.send("PONG :tmi.twitch.tv");
           return;
         }
-
         const lines = data.split("\r\n").filter(Boolean);
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
@@ -120,12 +196,12 @@
       });
 
       ws.addEventListener("close", () => {
-        showDebug("Disconnected — retrying in 2s…");
+        if (debug) $debug.textContent = "Disconnected — retrying in 2s…";
         setTimeout(() => connectIrc(chan), 2000);
       });
 
       ws.addEventListener("error", () => {
-        showDebug("WebSocket error (network/CSP).");
+        if (debug) $debug.textContent = "WebSocket error (network/CSP).";
       });
     }
 
@@ -173,9 +249,7 @@
         for (const loc of locs.split(",")) {
           const [startStr, endStr] = loc.split("-");
           const start = Number(startStr), end = Number(endStr);
-          if (Number.isFinite(start) && Number.isFinite(end)) {
-            ranges.push({ start, end, id });
-          }
+          if (Number.isFinite(start) && Number.isFinite(end)) ranges.push({ start, end, id });
         }
       }
       if (!ranges.length) return [escapeHtml(text)];
@@ -195,16 +269,40 @@
     function addMessage(name, color, htmlParts) {
       const el = document.createElement("div");
       el.className = "msg";
-      el.innerHTML = `<span class="name" style="color:${color}">${escapeHtml(name)}:</span> <span>${htmlParts.join("")}</span>`;
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "name";
+      nameEl.textContent = name;
+      nameEl.style.color = color || "#fff";
+
+      const textEl = document.createElement("div");
+      textEl.className = "text";
+      textEl.innerHTML = htmlParts.join("");
+
+      meta.appendChild(nameEl);
+      el.appendChild(meta);
+      el.appendChild(textEl);
+
       $stack.appendChild(el);
 
+      // Keep list tight
       while ($stack.children.length > max) $stack.removeChild($stack.firstChild);
-    }
 
-    function showDebug(msg) {
-      if (debug) {
-        $debug.style.display = "block";
-        $debug.textContent = `DEBUG: ${msg}`;
+      // TTL removal
+      if (ttlSeconds > 0) {
+        const removeAtMs = ttlSeconds * 1000;
+        const fadeMs = Math.max(0, fadeSeconds * 1000);
+
+        // Start fade near the end
+        if (fadeMs > 0 && removeAtMs > fadeMs) {
+          setTimeout(() => el.classList.add("out"), removeAtMs - fadeMs);
+          setTimeout(() => el.remove(), removeAtMs);
+        } else {
+          setTimeout(() => el.remove(), removeAtMs);
+        }
       }
     }
 
@@ -222,6 +320,11 @@
       if (!Number.isFinite(n)) return fallback;
       const i = Math.floor(n);
       return Math.max(min, Math.min(max, i));
+    }
+    function clampFloat(value, fallback, min, max) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(min, Math.min(max, n));
     }
   </script>
 </body>
