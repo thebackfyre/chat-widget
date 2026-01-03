@@ -55,13 +55,20 @@
       position: fixed;
       left: var(--pad);
       right: var(--pad);
+      top: var(--pad);
       bottom: var(--pad);
+
       display: flex;
       flex-direction: column;
+      justify-content: flex-end; /* keep newest at the bottom */
       gap: var(--gap);
+
       max-width: var(--maxWidth);
+
+      overflow: hidden; /* prevents old bubbles from vanishing unpredictably */
       pointer-events: none;
     }
+
 
     .msg {
       display: flex;
