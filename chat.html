@@ -1,274 +1,134 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0" />
-  <title>Custom Twitch Chat Overlay</title>
+  <title>Chat Widget (Minimal)</title>
   <style>
-    :root{
-      --pad: 14px;
-      --gap: 10px;
-      --fontSize: 18px;
-      --maxWidth: 520px;
-
-      --bubbleBg: rgba(0,0,0,0.55);
-      --textColor: rgba(255,255,255,0.95);
-      --outline: 1px solid rgba(255,255,255,0.10);
-      --shadow: 0 10px 28px rgba(0,0,0,0.35);
-
-      --bubbleBlur: 10px;
-      --radius: 14px;
-
-      --nameWeight: 800;
-      --msgWeight: 500;
-
-      --badgeBg: rgba(255,255,255,0.12);
-      --badgeText: rgba(255,255,255,0.95);
-      --badgeRadius: 999px;
-
-      --enterMs: 220ms;
-      --exitMs: 250ms;
-      --exitShift: 8px;
-    }
-
-    html, body {
-      margin: 0;
-      width: 100%;
-      height: 100%;
-      background: transparent;
-      overflow: hidden;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
-    }
-
+    html, body { margin:0; width:100%; height:100%; background:transparent; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     #debug {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      padding: 6px 10px;
-      font: 13px ui-sans-serif, system-ui;
-      background: rgba(255,0,0,0.75);
-      color: #fff;
+      position: fixed; top:0; left:0; right:0;
+      padding: 8px 10px;
+      background: rgba(255,0,0,0.85);
+      color: white;
+      font-size: 14px;
       z-index: 99999;
-      display: none;
-      pointer-events: none;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-
-    #root {
-      position: fixed;
-      inset: 0;
-      padding: var(--pad);
-      display: flex;
+    #stack {
+      position: fixed; left: 14px; right: 14px; bottom: 14px;
+      display: flex; flex-direction: column; gap: 10px;
+      max-width: 520px;
       pointer-events: none;
     }
-
-    #stack {
-      width: 100%;
-      max-width: var(--maxWidth);
-      display: flex;
-      flex-direction: column;
-      gap: var(--gap);
-    }
-
-    /* message bubble */
     .msg {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 6px;
+      background: rgba(0,0,0,0.55);
+      color: rgba(255,255,255,0.95);
+      border-radius: 14px;
       padding: 12px 14px;
-      border-radius: var(--radius);
-      background: var(--bubbleBg);
-      backdrop-filter: blur(var(--bubbleBlur));
-      -webkit-backdrop-filter: blur(var(--bubbleBlur));
-      box-shadow: var(--shadow);
-      border: var(--outline);
-      max-width: 100%;
-      word-wrap: break-word;
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    /* enter animation */
-    .anim-in {
-      transform: translateY(10px);
-      opacity: 0;
-      animation: in var(--enterMs) ease-out forwards;
-    }
-    @keyframes in {
-      to { transform: translateY(0); opacity: 1; }
-    }
-
-    /* exit animation */
-    .anim-out {
-      animation: out var(--exitMs) ease-in forwards;
-    }
-    @keyframes out {
-      to { opacity: 0; transform: translateY(var(--exitShift)); }
-    }
-
-    .topline{
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      line-height: 1.1;
-    }
-
-    .badges{
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .badge{
-      display: inline-flex;
-      align-items: center;
-      padding: 3px 8px;
-      font-size: calc(var(--fontSize) * 0.68);
-      line-height: 1;
-      border-radius: var(--badgeRadius);
-      background: var(--badgeBg);
-      color: var(--badgeText);
-      border: 1px solid rgba(255,255,255,0.10);
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
-      font-weight: 800;
-    }
-
-    .name{
-      font-weight: var(--nameWeight);
-      font-size: calc(var(--fontSize) * 1.02);
-      text-shadow: 0 2px 10px rgba(0,0,0,0.35);
-    }
-
-    .text{
-      font-weight: var(--msgWeight);
-      font-size: var(--fontSize);
+      font-size: 18px;
       line-height: 1.25;
-      color: var(--textColor);
-      text-shadow: 0 2px 10px rgba(0,0,0,0.35);
-      white-space: pre-wrap;
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+      opacity: 0;
+      transform: translateY(10px);
+      animation: in 220ms ease-out forwards;
     }
-
-    .emote {
-      height: 1.25em;
-      vertical-align: -0.25em;
-      margin: 0 2px;
-    }
+    @keyframes in { to { opacity:1; transform: translateY(0); } }
+    .name { font-weight: 800; margin-right: 8px; }
+    .emote { height: 1.25em; vertical-align: -0.25em; margin: 0 2px; }
   </style>
 </head>
 <body>
-  <div id="debug"></div>
-  <div id="root"><div id="stack"></div></div>
+  <div id="debug">LOADED ✅</div>
+  <div id="stack"></div>
 
   <script>
     const params = new URLSearchParams(location.search);
+    const demo  = params.get("demo") === "1";
+    const debug = params.get("debug") === "1";
 
-    // ---- core toggles ----
-    const demo       = params.get("demo") === "1";
-    const debug      = params.get("debug") === "1";
-    const anim       = getBool(params, "anim", true);
-    const showBadges = getBool(params, "badges", true);
-    const showName   = getBool(params, "name", true);
+    const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
+    const max = clampInt(params.get("max"), 30, 1, 200);
 
-    // ---- channel ----
-    const DEFAULT_CHANNEL = (params.get("default") || "alveussanctuary").toLowerCase();
-    const channel = (params.get("ch") || DEFAULT_CHANNEL).toLowerCase();
-
-    // ---- behavior ----
-    const maxMessages = clampInt(params.get("max"), 30, 1, 200);
-    const ttlSeconds  = clampInt(params.get("ttl"), 20, 0, 3600); // 0 = never remove
-    const fadeSeconds = clampFloat(params.get("fade"), 0.25, 0, 30); // seconds (0 = no fade animation)
-    const enterMs     = clampInt(params.get("enter"), 220, 0, 2000);
-    const exitMs      = clampInt(params.get("exit"), 250, 0, 2000);
-
-    // ---- style from URL (no editing needed) ----
-    applyCssVarsFromUrl(params);
-
-    // apply animation timings
-    document.documentElement.style.setProperty("--enterMs", `${enterMs}ms`);
-    document.documentElement.style.setProperty("--exitMs", `${exitMs}ms`);
-
-    // layout controls
-    applyLayoutFromUrl(params);
-
-    const $stack = document.getElementById("stack");
     const $debug = document.getElementById("debug");
+    const $stack = document.getElementById("stack");
 
-    if (debug) {
-      $debug.style.display = "block";
-      $debug.textContent = demo
-        ? `DEMO | ch=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`
-        : `LIVE IRC | ch=${channel} | max=${maxMessages} | ttl=${ttlSeconds}s | fade=${fadeSeconds}s`;
+    // Always show status banner so the page never "looks blank"
+    $debug.textContent = demo
+      ? `LOADED ✅ | DEMO MODE | ch=${channel}`
+      : `LOADED ✅ | IRC MODE | ch=${channel}`;
+
+    if (!debug) {
+      // Hide the banner if debug=0 (default)
+      $debug.style.display = "none";
     }
 
     if (demo) {
       runDemo();
     } else {
-      connectTwitchIrc(channel);
+      connectIrc(channel);
     }
 
-    // ---- DEMO ----
-    function runDemo(){
+    function runDemo() {
       const samples = [
-        { tags: { "display-name":"Leo", color:"#9bf", badges:"broadcaster/1" }, text:"demo: broadcaster badge + styling 👋" },
-        { tags: { "display-name":"ModUser", color:"#f66", badges:"moderator/1" }, text:"demo: MOD badge, message fades later" },
-        { tags: { "display-name":"VIPUser", color:"#c6f", badges:"vip/1" }, text:"demo: VIP badge" },
-        { tags: { "display-name":"SubUser", color:"#6f6", badges:"subscriber/12" }, text:"demo: SUB badge (tier/length varies)" },
-        { tags: { "display-name":"Viewer123", color:"#fc6", badges:"" }, text:"demo: normal chatter, emotes won't render here" }
+        { name:"Leo", color:"#9bf", text:"demo: this page is rendering" },
+        { name:"ModUser", color:"#6f6", text:"demo: next is IRC mode" },
+        { name:"Viewer", color:"#fc6", text:"demo: alveussanctuary is a good live test channel" }
       ];
       let i = 0;
       setInterval(() => {
         const s = samples[i++ % samples.length];
-        const parsed = {
-          displayName: s.tags["display-name"],
-          color: s.tags.color,
-          badges: parseBadgesTag(s.tags.badges || ""),
-          htmlParts: [escapeHtml(s.text)]
-        };
-        addMessage(parsed);
+        addMessage(s.name, s.color, [escapeHtml(s.text)]);
       }, 1200);
     }
 
-    // ---- TWITCH IRC (anonymous read-only) ----
-    function connectTwitchIrc(chan) {
-      const ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+    function connectIrc(chan) {
+      let ws;
+      try {
+        ws = new WebSocket("wss://irc-ws.chat.twitch.tv:443");
+      } catch (e) {
+        showDebug(`WebSocket failed: ${e.message}`);
+        return;
+      }
+
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
+        showDebug(`Connected ✅ as ${anonNick} (joining #${chan})`);
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
         ws.send("JOIN #" + chan);
-        if (debug) $debug.textContent = `LIVE IRC | ch=${chan} | connected as ${anonNick}`;
       });
 
       ws.addEventListener("message", (ev) => {
-        const data = ev.data;
-
-        if (typeof data === "string" && data.startsWith("PING")) {
+        const data = String(ev.data || "");
+        if (data.startsWith("PING")) {
           ws.send("PONG :tmi.twitch.tv");
           return;
         }
 
-        const lines = String(data).split("\r\n").filter(Boolean);
+        const lines = data.split("\r\n").filter(Boolean);
         for (const line of lines) {
-          if (line.includes(" PRIVMSG #")) {
-            const parsed = parsePrivmsg(line);
-            if (parsed) addMessage(parsed);
-          }
+          if (!line.includes(" PRIVMSG #")) continue;
+          const parsed = parsePrivmsg(line);
+          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts);
         }
       });
 
       ws.addEventListener("close", () => {
-        if (debug) $debug.textContent = `DISCONNECTED | retrying in 2s...`;
-        setTimeout(() => connectTwitchIrc(chan), 2000);
+        showDebug("Disconnected — retrying in 2s…");
+        setTimeout(() => connectIrc(chan), 2000);
+      });
+
+      ws.addEventListener("error", () => {
+        showDebug("WebSocket error (network/CSP).");
       });
     }
 
-    // ---- Parse PRIVMSG with tags ----
     function parsePrivmsg(line) {
       let tags = {};
       let rest = line;
@@ -283,16 +143,13 @@
       const msgIdx = rest.indexOf(" :");
       if (msgIdx === -1) return null;
 
-      const messageText = rest.slice(msgIdx + 2);
-
-      const displayName = tags["display-name"] || "Unknown";
+      const text = rest.slice(msgIdx + 2);
+      const name = tags["display-name"] || "Unknown";
       const color = tags["color"] || "#ffffff";
+      const emotes = tags["emotes"] || "";
+      const htmlParts = buildMessageHtmlParts(text, emotes);
 
-      const badges = parseBadgesTag(tags["badges"] || "");
-      const emoteTag = tags["emotes"] || "";
-      const htmlParts = buildMessageHtmlParts(messageText, emoteTag);
-
-      return { displayName, color, badges, htmlParts };
+      return { name, color, htmlParts };
     }
 
     function parseTags(raw) {
@@ -306,16 +163,6 @@
       return out;
     }
 
-    // badges tag example: "moderator/1,subscriber/12,vip/1"
-    function parseBadgesTag(badgesStr){
-      if (!badgesStr) return [];
-      return badgesStr.split(",").map(b => {
-        const [type, ver] = b.split("/");
-        return { type, ver };
-      }).filter(x => x.type);
-    }
-
-    // Twitch emotes tag example: "25:0-4,12-16/1902:6-10"
     function buildMessageHtmlParts(text, emotesTag) {
       if (!emotesTag) return [escapeHtml(text)];
 
@@ -331,198 +178,51 @@
           }
         }
       }
-      if (ranges.length === 0) return [escapeHtml(text)];
-      ranges.sort((a, b) => a.start - b.start);
+      if (!ranges.length) return [escapeHtml(text)];
+      ranges.sort((a,b) => a.start - b.start);
 
       const parts = [];
       let cursor = 0;
-
       for (const r of ranges) {
         if (r.start > cursor) parts.push(escapeHtml(text.slice(cursor, r.start)));
-        const emoteUrl = `https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/1.0`;
-        parts.push(`<img class="emote" alt="" src="${emoteUrl}">`);
+        parts.push(`<img class="emote" alt="" src="https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/1.0">`);
         cursor = r.end + 1;
       }
       if (cursor < text.length) parts.push(escapeHtml(text.slice(cursor)));
-
       return parts;
     }
 
-    // ---- Render ----
-    function addMessage({ displayName, color, badges, htmlParts }) {
+    function addMessage(name, color, htmlParts) {
       const el = document.createElement("div");
       el.className = "msg";
-      if (anim && enterMs > 0) el.classList.add("anim-in");
-
-      const top = document.createElement("div");
-      top.className = "topline";
-
-      if (showBadges) {
-        const badgeRow = renderTextBadges(badges || []);
-        if (badgeRow) top.appendChild(badgeRow);
-      }
-
-      if (showName) {
-        const name = document.createElement("span");
-        name.className = "name";
-        name.textContent = displayName;
-        name.style.color = color || "#fff";
-        top.appendChild(name);
-      }
-
-      const text = document.createElement("div");
-      text.className = "text";
-      text.innerHTML = htmlParts.join("");
-
-      // If topline would be empty, don't append it (keeps layout clean if name/badges off)
-      if (top.childNodes.length) el.appendChild(top);
-      el.appendChild(text);
-
+      el.innerHTML = `<span class="name" style="color:${color}">${escapeHtml(name)}:</span> <span>${htmlParts.join("")}</span>`;
       $stack.appendChild(el);
 
-      // enforce max messages (remove oldest from top)
-      while ($stack.children.length > maxMessages) {
-        $stack.removeChild($stack.firstChild);
-      }
+      while ($stack.children.length > max) $stack.removeChild($stack.firstChild);
+    }
 
-      // TTL removal
-      if (ttlSeconds > 0) {
-        const fadeAt = Math.max(0, ttlSeconds - fadeSeconds);
-        setTimeout(() => {
-          if (fadeSeconds > 0 && anim && exitMs > 0) {
-            el.classList.add("anim-out");
-            setTimeout(() => el.remove(), exitMs + 30);
-          } else {
-            el.remove();
-          }
-        }, ttlSeconds * 1000);
+    function showDebug(msg) {
+      if (debug) {
+        $debug.style.display = "block";
+        $debug.textContent = `DEBUG: ${msg}`;
       }
     }
 
-    function renderTextBadges(badges){
-      // Map badge types → labels (Phase A)
-      // Not all badges appear in all channels; order matters.
-      const order = [
-        "broadcaster",
-        "moderator",
-        "vip",
-        "partner",
-        "staff",
-        "admin",
-        "global_mod",
-        "founder",
-        "subscriber",
-        "bits"
-      ];
-
-      const labelFor = (b) => {
-        switch (b.type) {
-          case "broadcaster": return "LIVE";
-          case "moderator": return "MOD";
-          case "vip": return "VIP";
-          case "partner": return "PARTNER";
-          case "staff": return "STAFF";
-          case "admin": return "ADMIN";
-          case "global_mod": return "GLOBAL MOD";
-          case "founder": return "FOUNDER";
-          case "subscriber": return "SUB";
-          case "bits": return "BITS";
-          default: return null;
-        }
-      };
-
-      // keep only known badges
-      const filtered = badges
-        .map(b => ({...b, label: labelFor(b)}))
-        .filter(b => b.label);
-
-      if (!filtered.length) return null;
-
-      // sort by preferred order
-      filtered.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
-
-      const row = document.createElement("div");
-      row.className = "badges";
-
-      for (const b of filtered) {
-        const pill = document.createElement("span");
-        pill.className = "badge";
-        // include subscriber "months"/tier-ish hint if version is present (light touch)
-        if (b.type === "subscriber" && b.ver) {
-          pill.textContent = `SUB`;
-        } else {
-          pill.textContent = b.label;
-        }
-        row.appendChild(pill);
-      }
-
-      return row;
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
     }
 
-    // ---- URL → CSS vars (customizable without editing) ----
-    function applyCssVarsFromUrl(p){
-      // numeric
-      setVarNum(p, "pad", "--pad", 14, 0, 100, "px");
-      setVarNum(p, "gap", "--gap", 10, 0, 60, "px");
-      setVarNum(p, "fs", "--fontSize", 18, 10, 60, "px");
-      setVarNum(p, "mw", "--maxWidth", 520, 200, 1200, "px");
-      setVarNum(p, "radius", "--radius", 14, 0, 60, "px");
-      setVarNum(p, "blur", "--bubbleBlur", 10, 0, 40, "px");
-
-      // colors via r,g,b,a format: bg=0,0,0,0.55
-      setVarRgba(p, "bg", "--bubbleBg", "rgba(0,0,0,0.55)");
-      setVarRgba(p, "tc", "--textColor", "rgba(255,255,255,0.95)");
-      setVarRgba(p, "bbg", "--badgeBg", "rgba(255,255,255,0.12)");
-      setVarRgba(p, "btc", "--badgeText", "rgba(255,255,255,0.95)");
-
-      // outline/shadow strings (advanced)
-      // outline=1px solid rgba(255,255,255,0.10)
-      if (p.has("outline")) document.documentElement.style.setProperty("--outline", decodeURIComponent(p.get("outline")));
-      // shadow=0 10px 28px rgba(0,0,0,0.35)
-      if (p.has("shadow")) document.documentElement.style.setProperty("--shadow", decodeURIComponent(p.get("shadow")));
+    function clampInt(value, fallback, min, max) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      const i = Math.floor(n);
+      return Math.max(min, Math.min(max, i));
     }
-
-    // ---- Layout control (no CSS edits) ----
-    function applyLayoutFromUrl(p){
-      // align: left|center|right
-      const align = (p.get("align") || "left").toLowerCase();
-      const root = document.getElementById("root");
-
-      // stack: bottom|top
-      const stackDir = (p.get("stack") || "bottom").toLowerCase();
-      const stack = document.getElementById("stack");
-
-      // root uses flex; stack is a column
-      if (align === "center") root.style.justifyContent = "center";
-      else if (align === "right") root.style.justifyContent = "flex-end";
-      else root.style.justifyContent = "flex-start";
-
-      if (stackDir === "top") {
-        root.style.alignItems = "flex-start";
-        stack.style.flexDirection = "column";
-      } else {
-        root.style.alignItems = "flex-end";
-        stack.style.flexDirection = "column";
-      }
-    }
-
-    // ---- helpers ----
-    function getBool(p, key, fallback){
-      if (!p.has(key)) return fallback;
-      const v = (p.get(key) || "").toLowerCase();
-      return v === "1" || v === "true" || v === "yes" || v === "on";
-    }
-
-    function setVarNum(p, key, cssVar, fallback, min, max, unit){
-      const v = p.get(key);
-      if (v == null) {
-        document.documentElement.style.setProperty(cssVar, `${fallback}${unit}`);
-        return;
-      }
-      const n = Number(v);
-      if (!Number.isFinite(n)) return;
-      const clamped = Math.max(min, Math.min(max, n));
-      document.documentElement.style.setProperty(cssVar, `${clamped}${unit}`);
-    }
-
-    function setVarRgba(
+  </script>
+</body>
+</html>
