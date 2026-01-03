@@ -130,6 +130,19 @@
       vertical-align: -0.25em;
       margin: 0 2px;
     }
+    .badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge {
+      height: 1.15em;
+      width: auto;
+      vertical-align: -0.18em;
+      image-rendering: -webkit-optimize-contrast;
+    }
+
   </style>
 </head>
 
@@ -184,7 +197,7 @@
 
       ws.addEventListener("open", () => {
         if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan}) | max=${max}`;
-        ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+        ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
         ws.send("JOIN #" + chan);
