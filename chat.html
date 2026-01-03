@@ -65,7 +65,7 @@
 
       max-width: var(--maxWidth);
 
-      overflow: hidden;
+      overflow: hidden; /* prevents old bubbles from vanishing unpredictably */
       pointer-events: none;
     }
 
@@ -104,23 +104,10 @@
 
     .meta {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       gap: 10px;
       flex-wrap: wrap;
       line-height: 1.1;
-    }
-
-    .badges {
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    .badge {
-      vertical-align: -0.20em;
-      image-rendering: auto;
-      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.35));
     }
 
     .name {
@@ -144,6 +131,15 @@
       vertical-align: -0.25em;
       margin: 0 2px;
     }
+
+    /* NEW: badges */
+    .badge{
+      height: 1.15em;
+      width: auto;
+      vertical-align: -0.15em;
+      margin-right: 6px;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+    }
   </style>
 </head>
 <body>
@@ -158,129 +154,119 @@
     const channel = (params.get("ch") || "alveussanctuary").toLowerCase();
     const max = clampInt(params.get("max"), 30, 1, 200);
 
-    // Lifecycle
+    // Default lifecycle: keeps it tidy
     const ttlSeconds  = clampInt(params.get("ttl"), 22, 0, 3600);   // 0 = never remove
     const fadeSeconds = clampFloat(params.get("fade"), 2.0, 0, 30); // fade animation window
 
-    // Badges
-    const badgesOn = (params.get("badges") || "on").toLowerCase() !== "off";
-    const bscale = clampFloat(params.get("bscale"), 2.0, 0.5, 5.0);
+    // NEW: Badge proxy (Cloudflare Worker)
+    // example:
+    // badgeProxy=https%3A%2F%2Ftwitch-badge-proxy.thebackfyre.workers.dev
+    const badgeProxy = (params.get("badgeProxy") || "").replace(/\/+$/,""); // trim trailing slashes
 
     const $debug = document.getElementById("debug");
     const $stack = document.getElementById("stack");
 
-    // badgeKey -> {1x,2x,4x}
-    // badgeKey format: "setId/versionId"
-    let badgeMap = new Map();
-    let badgeSetsCount = 0;
-    let badgeVersCount = 0;
+    if (debug) {
+      $debug.style.display = "block";
+      $debug.textContent = demo
+        ? `DEMO | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | badgeProxy=${badgeProxy || "(off)"}`
+        : `IRC  | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | badgeProxy=${badgeProxy || "(off)"}`;
+    }
 
-    if (debug) $debug.style.display = "block";
+    if (demo) runDemo();
+    else connectIrc(channel);
 
-    boot();
+    // ---------------------------
+    // Badge cache + helpers
+    // ---------------------------
+    const badgeCache = {
+      global: null,            // Map("set/version" -> url)
+      channels: new Map(),     // broadcasterId -> Map(...)
+      globalLoaded: false
+    };
 
-    async function boot() {
-      // Load badge maps first (so rendering works immediately)
-      if (badgesOn) {
+    function buildBadgeMap(helixJson) {
+      const map = new Map();
+      const sets = helixJson?.data || [];
+      for (const set of sets) {
+        const setId = set.set_id;
+        for (const v of (set.versions || [])) {
+          map.set(`${setId}/${v.id}`, v.image_url_2x || v.image_url_1x);
+        }
+      }
+      return map;
+    }
+
+    async function ensureBadgesLoaded(broadcasterId) {
+      if (!badgeProxy) return;
+
+      // Global (load once)
+      if (!badgeCache.globalLoaded) {
+        badgeCache.globalLoaded = true;
         try {
-          await loadBadges(channel);
+          const r = await fetch(`${badgeProxy}/badges/global`, { cache: "no-store" });
+          if (r.ok) badgeCache.global = buildBadgeMap(await r.json());
+          else badgeCache.global = new Map();
         } catch (e) {
-          // keep going; chat still works without badges
+          badgeCache.global = new Map();
         }
       }
 
-      updateDebugBanner({
-        mode: demo ? "DEMO" : "IRC ",
-        bid: "(none)",
-      });
-
-      if (demo) runDemo();
-      else connectIrc(channel);
-    }
-
-    function updateDebugBanner(extra = {}) {
-      if (!debug) return;
-      const mode = extra.mode ?? (demo ? "DEMO" : "IRC ");
-      const bid  = extra.bid ?? "(none)";
-      const bm   = badgesOn ? "on" : "off";
-
-      $debug.textContent =
-        `${mode} | ch=${channel} | max=${max} | ttl=${ttlSeconds}s | ` +
-        `badges=${bm} | bid=${bid} | bscale=${bscale} | ` +
-        `badgeMap=${badgesOn ? "ready" : "off"} sets=${badgeSetsCount} vers=${badgeVersCount}`;
-    }
-
-    async function loadBadges(chan) {
-      // Twitch badge endpoints (public)
-      const globalUrl  = "https://badges.twitch.tv/v1/badges/global/display?language=en";
-      const channelUrl = `https://badges.twitch.tv/v1/badges/channels/${encodeURIComponent(chan)}/display?language=en`;
-
-      const [g, c] = await Promise.allSettled([
-        fetchJson(globalUrl),
-        fetchJson(channelUrl),
-      ]);
-
-      const newMap = new Map();
-      let sets = 0;
-      let vers = 0;
-
-      if (g.status === "fulfilled") {
-        const { setsCount, versCount } = ingestBadgeJson(g.value, newMap);
-        sets += setsCount; vers += versCount;
-      }
-      if (c.status === "fulfilled") {
-        const { setsCount, versCount } = ingestBadgeJson(c.value, newMap);
-        sets += setsCount; vers += versCount;
-      }
-
-      badgeMap = newMap;
-      badgeSetsCount = sets;
-      badgeVersCount = vers;
-    }
-
-    async function fetchJson(url) {
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      return await res.json();
-    }
-
-    function ingestBadgeJson(json, map) {
-      // Expected shape: { badge_sets: { <setId>: { versions: { <verId>: { image_url_1x, image_url_2x, image_url_4x }}}}}
-      const badge_sets = json && json.badge_sets ? json.badge_sets : null;
-      if (!badge_sets) return { setsCount: 0, versCount: 0 };
-
-      const setIds = Object.keys(badge_sets);
-      let versCount = 0;
-
-      for (const setId of setIds) {
-        const set = badge_sets[setId];
-        const versions = set && set.versions ? set.versions : {};
-        for (const verId of Object.keys(versions)) {
-          const v = versions[verId];
-          const key = `${setId}/${verId}`;
-          map.set(key, {
-            "1x": v.image_url_1x || "",
-            "2x": v.image_url_2x || "",
-            "4x": v.image_url_4x || "",
-          });
-          versCount++;
+      // Channel (per broadcaster)
+      if (!broadcasterId) return;
+      if (!badgeCache.channels.has(broadcasterId)) {
+        try {
+          const r = await fetch(`${badgeProxy}/badges/channels/${encodeURIComponent(broadcasterId)}`, { cache: "no-store" });
+          if (r.ok) badgeCache.channels.set(broadcasterId, buildBadgeMap(await r.json()));
+          else badgeCache.channels.set(broadcasterId, new Map());
+        } catch (e) {
+          badgeCache.channels.set(broadcasterId, new Map());
         }
       }
-
-      return { setsCount: setIds.length, versCount };
     }
 
+    function parseBadgesTag(badgesTag) {
+      // "moderator/1,subscriber/12" -> ["moderator/1","subscriber/12"]
+      if (!badgesTag) return [];
+      return badgesTag.split(",").map(s => s.trim()).filter(Boolean);
+    }
+
+    function buildBadgesFragment(keys, broadcasterId) {
+      const frag = document.createDocumentFragment();
+      const globalMap = badgeCache.global || new Map();
+      const chanMap = broadcasterId ? (badgeCache.channels.get(broadcasterId) || new Map()) : new Map();
+
+      for (const key of keys) {
+        const url = chanMap.get(key) || globalMap.get(key);
+        if (!url) continue;
+
+        const img = document.createElement("img");
+        img.className = "badge";
+        img.alt = "";
+        img.src = url;
+        frag.appendChild(img);
+      }
+      return frag;
+    }
+
+    // ---------------------------
+    // Demo / IRC
+    // ---------------------------
     function runDemo() {
-      const samples = [
-        { name:"Leo", color:"#9bf", badges:"moderator/1", text:"Demo shows badges + multi-bubble stack ✅" },
-        { name:"SubUser", color:"#6f6", badges:"subscriber/0", text:"If you see a sub badge here, mapping works." },
-        { name:"Viewer", color:"#fc6", badges:"vip/1", text:"Next: cheer, bits, and special badges." }
-      ];
-      let i = 0;
+      // Demo can optionally fake badges if you add demoBadges=1
+      const demoBadgesOn = params.get("demoBadges") === "1";
 
+      const samples = [
+        { name:"Leo", color:"#9bf", text:"Demo mode 👋 badges will only show if demoBadges=1", badges: "broadcaster/1", roomId: "79615025" },
+        { name:"ModUser", color:"#6f6", text:"This line tests multiple bubbles + badge rendering.", badges: "moderator/1,subscriber/12", roomId: "79615025" },
+        { name:"Viewer", color:"#fc6", text:"If badgeProxy is set, live will show real badges.", badges: "subscriber/3", roomId: "79615025" }
+      ];
+
+      let i = 0;
       setInterval(() => {
         const s = samples[i++ % samples.length];
-        addMessage(s.name, s.color, [escapeHtml(s.text)], s.badges);
+        const badges = demoBadgesOn ? s.badges : "";
+        addMessage(s.name, s.color, [escapeHtml(s.text)], badges, s.roomId);
       }, 1200);
     }
 
@@ -289,7 +275,7 @@
       const anonNick = "justinfan" + Math.floor(Math.random() * 80000 + 1000);
 
       ws.addEventListener("open", () => {
-        updateDebugBanner({ mode: "IRC ", bid: "(none)" });
+        if (debug) $debug.textContent = `Connected ✅ as ${anonNick} (joining #${chan}) | badgeProxy=${badgeProxy || "(off)"}`;
         ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
         ws.send("PASS SCHMOOPIIE");
         ws.send("NICK " + anonNick);
@@ -306,7 +292,7 @@
         for (const line of lines) {
           if (!line.includes(" PRIVMSG #")) continue;
           const parsed = parsePrivmsg(line);
-          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badges);
+          if (parsed) addMessage(parsed.name, parsed.color, parsed.htmlParts, parsed.badges, parsed.roomId);
         }
       });
 
@@ -338,15 +324,14 @@
       const name = tags["display-name"] || "Unknown";
       const color = tags["color"] || "#ffffff";
       const emotes = tags["emotes"] || "";
-      const badges = tags["badges"] || ""; // <-- this is what we map to images
+
+      // NEW: badges + room-id (broadcaster id)
+      const badges = tags["badges"] || "";
+      const roomId  = tags["room-id"] || "";
+
       const htmlParts = buildMessageHtmlParts(text, emotes);
 
-      if (debug) {
-        // show last seen badges id in banner
-        updateDebugBanner({ mode: "IRC ", bid: badges ? badges : "(none)" });
-      }
-
-      return { name, color, htmlParts, badges };
+      return { name, color, htmlParts, badges, roomId };
     }
 
     function parseTags(raw) {
@@ -387,46 +372,20 @@
       return parts;
     }
 
-    function buildBadgesNode(badgesTag) {
-      if (!badgesOn) return null;
-      if (!badgesTag) return null;
-
-      // badges tag looks like: "moderator/1,subscriber/12,glhf-pledge/1"
-      const pairs = badgesTag.split(",").map(s => s.trim()).filter(Boolean);
-      if (!pairs.length) return null;
-
-      const wrap = document.createElement("span");
-      wrap.className = "badges";
-
-      const sizePx = Math.round(14 * bscale); // tweak base size here if you want
-
-      for (const p of pairs) {
-        const info = badgeMap.get(p);
-        if (!info) continue;
-
-        const img = document.createElement("img");
-        img.className = "badge";
-        img.alt = "";
-        img.width = sizePx;
-        img.height = sizePx;
-
-        // pick best available url
-        img.src = info["4x"] || info["2x"] || info["1x"];
-        wrap.appendChild(img);
-      }
-
-      return wrap.childNodes.length ? wrap : null;
-    }
-
-    function addMessage(name, color, htmlParts, badgesTag = "") {
+    // NEW: async to allow badge fetch before render
+    async function addMessage(name, color, htmlParts, badgesTag, roomId) {
       const el = document.createElement("div");
       el.className = "msg";
 
       const meta = document.createElement("div");
       meta.className = "meta";
 
-      const badgesNode = buildBadgesNode(badgesTag);
-      if (badgesNode) meta.appendChild(badgesNode);
+      // Badges (if configured)
+      const badgeKeys = parseBadgesTag(badgesTag);
+      if (badgeProxy && roomId && badgeKeys.length) {
+        await ensureBadgesLoaded(roomId);
+        meta.appendChild(buildBadgesFragment(badgeKeys, roomId));
+      }
 
       const nameEl = document.createElement("span");
       nameEl.className = "name";
@@ -451,6 +410,7 @@
         const removeAtMs = ttlSeconds * 1000;
         const fadeMs = Math.max(0, fadeSeconds * 1000);
 
+        // Start fade near the end
         if (fadeMs > 0 && removeAtMs > fadeMs) {
           setTimeout(() => el.classList.add("out"), removeAtMs - fadeMs);
           setTimeout(() => el.remove(), removeAtMs);
@@ -460,6 +420,9 @@
       }
     }
 
+    // ---------------------------
+    // Utils
+    // ---------------------------
     function escapeHtml(str) {
       return String(str)
         .replaceAll("&","&amp;")
